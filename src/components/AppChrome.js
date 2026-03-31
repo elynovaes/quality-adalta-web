@@ -178,6 +178,11 @@ function SidebarSection({ title, items, collapsed, pathname }) {
 export default function AppChrome({ children }) {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
+  const isLoginRoute = pathname === '/login'
+
+  if (isLoginRoute) {
+    return children
+  }
 
   return (
     <div className={`app-layout ${collapsed ? 'app-layout--collapsed' : ''}`}>
