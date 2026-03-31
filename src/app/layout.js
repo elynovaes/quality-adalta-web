@@ -19,10 +19,28 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      lang="pt-BR"
+      className={`${geistSans.variable} ${geistMono.variable}`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body>
+        <div className="app-frame">
+          <header className="app-topbar">
+            <div className="app-topbar__inner">
+              <div className="app-brand">
+                <span className="app-brand__mark">QA</span>
+                <div className="app-brand__text">
+                  <span className="app-brand__title">Quality Adalta</span>
+                  <span className="app-brand__subtitle">Operations dashboard</span>
+                </div>
+              </div>
+
+              <div className="app-chip">Fluxo de serviços e documentação</div>
+            </div>
+          </header>
+
+          {children}
+        </div>
+      </body>
     </html>
   );
 }

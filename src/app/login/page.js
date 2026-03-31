@@ -2,14 +2,13 @@
 
 import { useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { Field, PageHeader, PageShell, SurfaceCard } from '../../components/ui'
 
 export default function Login() {
-
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
 
   async function fazerLogin() {
-
     const { error } = await supabase.auth.signInWithPassword({
       email: email,
       password: password,
@@ -20,33 +19,51 @@ export default function Login() {
     } else {
       window.location.href = '/dashboard'
     }
-
   }
 
   return (
-    <div style={{ padding: 40 }}>
+    <PageShell narrow>
+      <div className="login-shell">
+        <div className="login-panel stack-lg">
+          <PageHeader
+            eyebrow="Acesso"
+            title="Entrar no painel"
+            description="Use suas credenciais para acessar a área operacional e gerenciar serviços e documentações."
+            compact
+          />
 
-      <h1>Login</h1>
+          <SurfaceCard className="surface-card--hero">
+            <div className="stack-lg">
+              <Field label="Email">
+                <input
+                  id="email"
+                  className="input"
+                  placeholder="voce@empresa.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </Field>
 
-      <input
-        placeholder="email"
-        onChange={(e) => setEmail(e.target.value)}
-      />
+              <Field label="Senha">
+                <input
+                  id="password"
+                  className="input"
+                  type="password"
+                  placeholder="Digite sua senha"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </Field>
 
-      <br /><br />
-
-      <input
-        type="password"
-        placeholder="senha"
-        onChange={(e) => setPassword(e.target.value)}
-      />
-
-      <br /><br />
-
-      <button onClick={fazerLogin}>
-        Entrar
-      </button>
-
-    </div>
+              <div className="form-actions">
+                <button className="btn btn--primary" onClick={fazerLogin}>
+                  Entrar
+                </button>
+              </div>
+            </div>
+          </SurfaceCard>
+        </div>
+      </div>
+    </PageShell>
   )
 }

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { EmptyState, PageHeader, PageShell, SurfaceCard } from '@/components/ui';
 
 export default function DocumentacaoView({ dados }) {
   const router = useRouter();
@@ -37,91 +38,86 @@ export default function DocumentacaoView({ dados }) {
   }
 
   return (
-    <main style={{ padding: '24px' }}>
-      <h1>{dados.documentacao.titulo}</h1>
-
-      <p>
-        <strong>Categoria:</strong> {dados.documentacao.categoria}
-      </p>
-
-      <p>
-        <strong>Tipo:</strong> {dados.documentacao.tipo}
-      </p>
+    <PageShell>
+      <PageHeader
+        eyebrow="Documentação"
+        title={dados.documentacao.titulo}
+        description="Estrutura da documentação com anexos, seções e campos já cadastrados para consulta e manutenção."
+        meta={
+          <>
+            <span className="badge badge--primary">{dados.documentacao.categoria}</span>
+            <span className="badge">{dados.documentacao.tipo}</span>
+            <span className="badge">{dados.anexos.length} anexos</span>
+          </>
+        }
+      />
 
       {dados.anexos.length === 0 ? (
-        <p>Nenhum anexo encontrado para esta documentação.</p>
+        <SurfaceCard>
+          <EmptyState
+            title="Nenhum anexo encontrado"
+            description="Esta documentação ainda não possui anexos vinculados."
+          />
+        </SurfaceCard>
       ) : (
-        dados.anexos.map((anexo) => (
-          <section
-            key={anexo.id}
-            style={{
-              border: '1px solid #ddd',
-              borderRadius: '8px',
-              padding: '16px',
-              marginTop: '24px',
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: '16px',
-              }}
-            >
-              <div>
-                <h2>{anexo.nome}</h2>
-                <p>{anexo.descricao}</p>
+        <div className="anexo-list">
+          {dados.anexos.map((anexo) => (
+            <SurfaceCard key={anexo.id}>
+              <div className="surface-card__header">
+                <div>
+                  <h2 className="surface-card__title">{anexo.nome}</h2>
+                  <p className="surface-card__subtitle">
+                    {anexo.descricao || 'Sem descrição cadastrada para este anexo.'}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => criarSecao(anexo)}
+                  disabled={loadingAnexoId === anexo.id}
+                >
+                  {loadingAnexoId === anexo.id ? 'Criando...' : 'Nova seção'}
+                </button>
               </div>
 
-              <button
-                type="button"
-                style={{
-                  padding: '6px 12px',
-                  background: '#2563eb',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                }}
-                onClick={() => criarSecao(anexo)}
-                disabled={loadingAnexoId === anexo.id}
-              >
-                {loadingAnexoId === anexo.id ? 'Criando...' : '+ Nova Seção'}
-              </button>
-            </div>
+              {anexo.secoes.length === 0 ? (
+                <EmptyState
+                  title="Nenhuma seção encontrada"
+                  description="Use a ação acima para adicionar a primeira seção deste anexo."
+                />
+              ) : (
+                <div className="section-list">
+                  {anexo.secoes.map((secao) => (
+                    <div key={secao.id} className="section-panel">
+                      <div className="cluster">
+                        <span className="badge badge--primary">{secao.nome}</span>
+                        <span className="badge">
+                          {secao.campos.length} {secao.campos.length === 1 ? 'campo' : 'campos'}
+                        </span>
+                      </div>
 
-            {anexo.secoes.length === 0 ? (
-              <p>Nenhuma seção encontrada neste anexo.</p>
-            ) : (
-              anexo.secoes.map((secao) => (
-                <div
-                  key={secao.id}
-                  style={{
-                    marginTop: '16px',
-                    paddingLeft: '16px',
-                    borderLeft: '3px solid #ddd',
-                  }}
-                >
-                  <h3>{secao.nome}</h3>
-
-                  {secao.campos.length === 0 ? (
-                    <p>Nenhum campo nesta seção.</p>
-                  ) : (
-                    <ul>
-                      {secao.campos.map((campo) => (
-                        <li key={campo.id}>
-                          {campo.label} ({campo.tipo})
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                      {secao.campos.length === 0 ? (
+                        <p className="muted">Nenhum campo nesta seção.</p>
+                      ) : (
+                        <ul className="bullet-list">
+                          {secao.campos.map((campo) => (
+                            <li key={campo.id}>
+                              <span>
+                                {campo.label} <span className="muted">({campo.tipo})</span>
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))
-            )}
-          </section>
-        ))
+              )}
+            </SurfaceCard>
+          ))}
+        </div>
       )}
-    </main>
+    </PageShell>
   );
 }

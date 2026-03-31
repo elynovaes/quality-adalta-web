@@ -1,31 +1,54 @@
 'use client'
 
 import { useParams } from 'next/navigation'
+import { PageHeader, PageShell, SurfaceCard } from '../../../../../../components/ui'
 
 export default function QualificacaoPage() {
   const params = useParams()
 
   return (
-    <div style={{ padding: 40 }}>
-      <h1>Qualificação</h1>
+    <PageShell narrow>
+      <PageHeader
+        eyebrow="Qualificação"
+        title="Escolha o tipo"
+        description="Selecione o documento que deseja iniciar ou visualizar dentro da trilha de qualificação."
+        meta={<span className="badge badge--primary">Serviço #{params.id}</span>}
+      />
 
-      <p>ID do serviço: {params.id}</p>
+      <SurfaceCard className="surface-card--hero">
+        <div className="option-grid">
+          <button className="option-card">
+            <span className="option-card__title">Protocolo de OQ</span>
+            <span className="option-card__description">
+              Área destinada ao protocolo operacional de qualificação.
+            </span>
+          </button>
 
-      <h2>Escolha o tipo</h2>
+          <button
+            className="option-card"
+            onClick={() => window.location.href = `/dashboard/servico/${params.id}/documentacao/qualificacao/relatorio-oq`}
+          >
+            <span className="option-card__title">Relatório de OQ</span>
+            <span className="option-card__description">
+              Acesse o formulário atual de relatório de OQ.
+            </span>
+          </button>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        
-        <button>Protocolo de OQ</button>
-        
-        <button onClick={() => window.location.href = `/dashboard/servico/${params.id}/documentacao/qualificacao/relatorio-oq`}>
-          Relatório de OQ
-        
-        </button>
-        <button>Protocolo de IQ</button>
-        
-        <button>Relatório de IQ</button>
-     
-      </div>
-    </div>
+          <button className="option-card">
+            <span className="option-card__title">Protocolo de IQ</span>
+            <span className="option-card__description">
+              Espaço reservado para protocolo de IQ.
+            </span>
+          </button>
+
+          <button className="option-card">
+            <span className="option-card__title">Relatório de IQ</span>
+            <span className="option-card__description">
+              Espaço reservado para relatório de IQ.
+            </span>
+          </button>
+        </div>
+      </SurfaceCard>
+    </PageShell>
   )
 }

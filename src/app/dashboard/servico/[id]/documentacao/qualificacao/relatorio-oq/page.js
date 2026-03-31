@@ -2,9 +2,9 @@
 
 import { useParams } from 'next/navigation'
 import { useState } from 'react'
+import { Field, PageHeader, PageShell, SurfaceCard } from '../../../../../../../components/ui'
 
 export default function RelatorioOQPage() {
-
   const params = useParams()
 
   const [codigo, setCodigo] = useState('')
@@ -12,40 +12,62 @@ export default function RelatorioOQPage() {
   const [data, setData] = useState('')
 
   return (
-    <div style={{ padding: 40 }}>
+    <PageShell narrow>
+      <PageHeader
+        eyebrow="Relatório"
+        title="Relatório de OQ"
+        description="Preencha os dados gerais do relatório sem alterar o fluxo atual da aplicação."
+        meta={<span className="badge badge--primary">Serviço #{params.id}</span>}
+      />
 
-      <h1>Relatório de OQ</h1>
+      <SurfaceCard className="surface-card--hero">
+        <div className="stack-lg">
+          <div className="surface-card__header">
+            <div>
+              <h2 className="surface-card__title">Dados gerais</h2>
+              <p className="surface-card__subtitle">
+                Campos básicos para composição do relatório.
+              </p>
+            </div>
+          </div>
 
-      <p>ID do serviço: {params.id}</p>
+          <div className="form-grid form-grid--single">
+            <Field label="Código do relatório">
+              <input
+                id="codigo"
+                className="input"
+                placeholder="Informe o código"
+                value={codigo}
+                onChange={(e) => setCodigo(e.target.value)}
+              />
+            </Field>
 
-      <h2>Dados gerais</h2>
+            <Field label="Elaborador">
+              <input
+                id="elaborador"
+                className="input"
+                placeholder="Nome do elaborador"
+                value={elaborador}
+                onChange={(e) => setElaborador(e.target.value)}
+              />
+            </Field>
 
-      <div style={{ marginBottom: 10 }}>
-        <input
-          placeholder="Código do relatório"
-          value={codigo}
-          onChange={(e) => setCodigo(e.target.value)}
-        />
-      </div>
+            <Field label="Data">
+              <input
+                id="data"
+                className="input"
+                type="date"
+                value={data}
+                onChange={(e) => setData(e.target.value)}
+              />
+            </Field>
+          </div>
 
-      <div style={{ marginBottom: 10 }}>
-        <input
-          placeholder="Elaborador"
-          value={elaborador}
-          onChange={(e) => setElaborador(e.target.value)}
-        />
-      </div>
-
-      <div style={{ marginBottom: 10 }}>
-        <input
-          type="date"
-          value={data}
-          onChange={(e) => setData(e.target.value)}
-        />
-      </div>
-
-      <button>Salvar relatório</button>
-
-    </div>
+          <div className="form-actions">
+            <button className="btn btn--primary">Salvar relatório</button>
+          </div>
+        </div>
+      </SurfaceCard>
+    </PageShell>
   )
 }
