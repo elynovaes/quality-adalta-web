@@ -1,5 +1,6 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import AppChrome from "../components/AppChrome";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -24,21 +25,7 @@ export default function RootLayout({ children }) {
     >
       <body>
         <div className="app-frame">
-          <header className="app-topbar">
-            <div className="app-topbar__inner">
-              <div className="app-brand">
-                <span className="app-brand__mark">QA</span>
-                <div className="app-brand__text">
-                  <span className="app-brand__title">Quality Adalta</span>
-                  <span className="app-brand__subtitle">Operations dashboard</span>
-                </div>
-              </div>
-
-              <div className="app-chip">Fluxo de serviços e documentação</div>
-            </div>
-          </header>
-
-          {children}
+          <AppChrome>{children}</AppChrome>
         </div>
       </body>
     </html>

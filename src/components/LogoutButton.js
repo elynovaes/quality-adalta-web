@@ -4,7 +4,12 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
 
-export default function LogoutButton({ className = 'btn btn--secondary' }) {
+export default function LogoutButton({
+  className = 'btn btn--secondary',
+  label = 'Logout',
+  title,
+  children,
+}) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
 
@@ -23,8 +28,13 @@ export default function LogoutButton({ className = 'btn btn--secondary' }) {
   }
 
   return (
-    <button className={className} onClick={handleLogout} disabled={loading}>
-      {loading ? 'Saindo...' : 'Logout'}
+    <button
+      className={className}
+      onClick={handleLogout}
+      disabled={loading}
+      title={title || label}
+    >
+      {loading ? 'Saindo...' : children || label}
     </button>
   )
 }

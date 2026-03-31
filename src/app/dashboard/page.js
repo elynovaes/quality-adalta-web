@@ -4,7 +4,6 @@ import { useEffect, useEffectEvent, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 import { EmptyState, PageHeader, PageShell, SurfaceCard } from '../../components/ui'
-import LogoutButton from '../../components/LogoutButton'
 import NotificationToast from '../../components/NotificationToast'
 
 export default function Dashboard() {
@@ -132,12 +131,9 @@ export default function Dashboard() {
           title="Painel do sistema"
           description="Gerencie serviços cadastrados, acesse os detalhes operacionais e avance para os fluxos de documentação com uma estrutura visual mais clara."
           actions={
-            <>
-              <LogoutButton />
-              <button className="btn btn--primary" onClick={() => router.push('/dashboard/novo-servico')}>
-                Novo serviço
-              </button>
-            </>
+            <button className="btn btn--primary" onClick={() => router.push('/dashboard/novo-servico')}>
+              Novo serviço
+            </button>
           }
           meta={
             <>

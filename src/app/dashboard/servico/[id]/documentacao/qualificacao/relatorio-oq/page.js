@@ -1,11 +1,16 @@
 'use client'
 
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import { useState } from 'react'
 import { Field, PageHeader, PageShell, SurfaceCard } from '../../../../../../../components/ui'
 
 export default function RelatorioOQPage() {
   const params = useParams()
+  const searchParams = useSearchParams()
+  const numeroSistemas = searchParams.get('numeroSistemas')
+  const codigoDocumento = searchParams.get('codigoDocumento')
+  const cliente = searchParams.get('cliente')
+  const projeto = searchParams.get('projeto')
 
   const [codigo, setCodigo] = useState('')
   const [elaborador, setElaborador] = useState('')
@@ -17,7 +22,15 @@ export default function RelatorioOQPage() {
         eyebrow="Relatório"
         title="Relatório de OQ"
         description="Preencha os dados gerais do relatório sem alterar o fluxo atual da aplicação."
-        meta={<span className="badge badge--primary">Serviço #{params.id}</span>}
+        meta={
+          <>
+            <span className="badge badge--primary">Serviço #{params.id}</span>
+            {numeroSistemas ? <span className="badge">{numeroSistemas} sistemas</span> : null}
+            {codigoDocumento ? <span className="badge">{codigoDocumento}</span> : null}
+            {cliente ? <span className="badge">{cliente}</span> : null}
+            {projeto ? <span className="badge">{projeto}</span> : null}
+          </>
+        }
       />
 
       <SurfaceCard className="surface-card--hero">

@@ -1,10 +1,33 @@
 'use client'
 
-import { useParams } from 'next/navigation'
-import { PageHeader, PageShell, SurfaceCard } from '../../../../../components/ui'
+import { useState } from 'react'
+import { useParams, useRouter } from 'next/navigation'
+import { Field, PageHeader, PageShell, SurfaceCard } from '../../../../../components/ui'
 
 export default function DocumentacaoPage() {
   const params = useParams()
+  const router = useRouter()
+  const [mostrarEtapaQualificacao, setMostrarEtapaQualificacao] = useState(false)
+  const [numeroSistemas, setNumeroSistemas] = useState('1')
+  const [erroNumeroSistemas, setErroNumeroSistemas] = useState('')
+
+  function abrirEtapaQualificacao() {
+    setMostrarEtapaQualificacao(true)
+    setErroNumeroSistemas('')
+  }
+
+  function confirmarQualificacao() {
+    const quantidade = Number(numeroSistemas)
+
+    if (!numeroSistemas || Number.isNaN(quantidade) || quantidade < 1) {
+      setErroNumeroSistemas('Informe uma quantidade valida de sistemas, com minimo 1.')
+      return
+    }
+
+    router.push(
+      `/dashboard/servico/${params.id}/documentacao/qualificacao/dados-gerais?numeroSistemas=${quantidade}`
+    )
+  }
 
   return (
     <PageShell narrow>
@@ -33,13 +56,10 @@ export default function DocumentacaoPage() {
             </span>
           </button>
 
-          <button
-            className="option-card"
-            onClick={() => window.location.href = `/dashboard/servico/${params.id}/documentacao/qualificacao`}
-          >
+          <button className="option-card" onClick={abrirEtapaQualificacao}>
             <span className="option-card__title">Qualificação</span>
             <span className="option-card__description">
-              Acesse protocolos e relatórios de qualificação do serviço.
+              Antes de seguir, informe quantos sistemas serão qualificados.
             </span>
           </button>
 
@@ -58,6 +78,53 @@ export default function DocumentacaoPage() {
           </button>
         </div>
       </SurfaceCard>
+
+      {mostrarEtapaQualificacao ? (
+        <SurfaceCard>
+          <div className="surface-card__header">
+            <div>
+              <h2 className="surface-card__title">Quantidade de sistemas</h2>
+              <p className="surface-card__subtitle">
+                Defina quantos sistemas participarão do fluxo de qualificação antes de continuar.
+              </p>
+            </div>
+          </div>
+
+          <div className="stack">
+            <Field label="Numero de sistemas" hint="Informe um valor inteiro maior ou igual a 1">
+              <input
+                id="numeroSistemas"
+                className="input"
+                type="number"
+                min="1"
+                step="1"
+                value={numeroSistemas}
+                onChange={(event) => {
+                  setNumeroSistemas(event.target.value)
+                  setErroNumeroSistemas('')
+                }}
+              />
+            </Field>
+
+            {erroNumeroSistemas ? <p className="muted">{erroNumeroSistemas}</p> : null}
+
+            <div className="form-actions">
+              <button className="btn btn--primary" onClick={confirmarQualificacao}>
+                Continuar
+              </button>
+              <button
+                className="btn btn--ghost"
+                onClick={() => {
+                  setMostrarEtapaQualificacao(false)
+                  setErroNumeroSistemas('')
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </SurfaceCard>
+      ) : null}
     </PageShell>
   )
 }
