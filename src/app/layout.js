@@ -1,6 +1,7 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import AppChrome from "../components/AppChrome";
+import AppProviders from "../components/providers/AppProviders";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -24,9 +25,11 @@ export default function RootLayout({ children }) {
       className={`${geistSans.variable} ${geistMono.variable}`}
     >
       <body>
-        <div className="app-frame">
-          <AppChrome>{children}</AppChrome>
-        </div>
+        <AppProviders>
+          <div className="app-frame">
+            <AppChrome>{children}</AppChrome>
+          </div>
+        </AppProviders>
       </body>
     </html>
   );

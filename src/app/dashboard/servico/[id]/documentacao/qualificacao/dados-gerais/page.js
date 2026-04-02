@@ -1,24 +1,15 @@
 'use client'
 
 import Image from 'next/image'
-import { useState } from 'react'
-import { useParams, useRouter, useSearchParams } from 'next/navigation'
-import { Field, PageHeader, PageShell, SurfaceCard } from '../../../../../../../components/ui'
-import { carregarFluxoQualificacaoLocal, salvarFluxoQualificacaoLocal } from '../../../../../../../lib/qualificacao-storage'
-import {
-  criarConfiguracaoDocumentosVazia,
-  criarListaSistemas,
-  formatarModoCriacaoDocumentacao,
-  formatarTipoQualificacao,
-  normalizarConfiguracaoDocumentos,
-  normalizarGeneralData,
-  normalizarSistema,
-  parseJsonParam,
-  serializarFluxoQualificacao,
-  TIPOS_QUALIFICACAO,
-} from '../../../../../../../lib/qualificacao'
-
-const TIPOS_LOGO_ACEITOS = ['image/png', 'image/jpeg']
+import { useEffect, useState } from 'react'
+import { useParams, useRouter } from 'next/navigation'
+import { Field, PageHeader, PageShell, SurfaceCard } from '@/components/ui'
+import { formatarModoCriacaoDocumentacao, formatarTipoQualificacao } from '@/lib/qualificacao'
+import { useDocumentacaoFlowStore, useDocumentacaoFlowViewModel } from '@/stores/documentacao-flow-store'
+import { removeClientLogo, uploadClientLogo } from '@/features/documentacao/services/uploadLogoService'
+import { fetchServicoResumo } from '@/features/documentacao/services/servicoResumoService'
+import { qualificationTypeIds } from '@/features/documentacao/config/qualificationConfig'
+import { createEmptyDocumentSelection } from '@/types/documentacao-flow'
 
 function SectionFields({ title, description, children }) {
   return (
@@ -37,183 +28,101 @@ function SectionFields({ title, description, children }) {
 export default function DadosGeraisQualificacaoPage() {
   const params = useParams()
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const numeroSistemas = Number(searchParams.get('numeroSistemas') || '1')
-  const modoCriacaoDocumentacao = searchParams.get('modoCriacaoDocumentacao') || 'agrupado'
-  const systemsDataParam = searchParams.get('systemsData')
-  const generalDataParam = searchParams.get('generalData')
-  const groupedDocumentsParam = searchParams.get('groupedDocuments')
-  const fluxoPersistido =
-    typeof window === 'undefined' ? null : carregarFluxoQualificacaoLocal(params.id)
-
-  const [generalData, setGeneralData] = useState(() =>
-    normalizarGeneralData(parseJsonParam(generalDataParam, null) || fluxoPersistido?.generalData || null)
-  )
-
-  const [systems, setSystems] = useState(() => {
-    const parsedSystems = parseJsonParam(systemsDataParam, null) || fluxoPersistido?.systems || null
-
-    if (Array.isArray(parsedSystems) && parsedSystems.length > 0) {
-      return parsedSystems.map((system, index) => normalizarSistema(system, index))
-    }
-
-    return criarListaSistemas(numeroSistemas)
-  })
-
-  const [groupedDocuments, setGroupedDocuments] = useState(() =>
-    normalizarConfiguracaoDocumentos(
-      parseJsonParam(groupedDocumentsParam, null) ||
-        fluxoPersistido?.groupedDocuments ||
-        systems[0]?.documentosQualificacao ||
-        criarConfiguracaoDocumentosVazia()
-    )
-  )
+  const {
+    hydratePersistedFlow,
+    setServiceSnapshot,
+    updateGeneralData,
+    setLogoUploadStatus,
+    setLogoCliente,
+    updateSystemName,
+    updateDocumentSelection,
+  } = useDocumentacaoFlowStore()
+  const flow = useDocumentacaoFlowViewModel()
   const [activeSystemIndex, setActiveSystemIndex] = useState(0)
-  const [erroLogo, setErroLogo] = useState('')
 
-  const sistemaAtual = systems[activeSystemIndex]
-  const configuracaoAtual =
-    modoCriacaoDocumentacao === 'agrupado'
-      ? groupedDocuments
-      : sistemaAtual?.documentosQualificacao || criarConfiguracaoDocumentosVazia()
-
-  function atualizarCampo(path, value) {
-    setGeneralData((currentData) => ({
-      ...currentData,
-      [path]: {
-        ...currentData[path],
-        ...value,
-      },
-    }))
-  }
-
-  function atualizarLogoCliente(value) {
-    setGeneralData((currentData) => ({
-      ...currentData,
-      logoCliente: value,
-    }))
-  }
-
-  function atualizarNomeSistema(index, value) {
-    setSystems((currentSystems) =>
-      currentSystems.map((system, systemIndex) =>
-        systemIndex === index
-          ? {
-              ...system,
-              nome: value,
-            }
-          : system
-      )
-    )
-  }
-
-  function atualizarConfiguracaoDocumento(tipoDocumento, updater) {
-    if (modoCriacaoDocumentacao === 'agrupado') {
-      setGroupedDocuments((currentConfig) => ({
-        ...currentConfig,
-        [tipoDocumento]: updater(currentConfig[tipoDocumento]),
-      }))
+  useEffect(() => {
+    if (flow.serviceId === Number(params.id)) {
       return
     }
 
-    setSystems((currentSystems) =>
-      currentSystems.map((system, index) => {
-        if (index !== activeSystemIndex) {
-          return system
-        }
+    const hydrated = hydratePersistedFlow(Number(params.id))
 
-        return {
-          ...system,
-          documentosQualificacao: {
-            ...system.documentosQualificacao,
-            [tipoDocumento]: updater(system.documentosQualificacao[tipoDocumento]),
-          },
-        }
-      })
-    )
-  }
+    if (!hydrated) {
+      fetchServicoResumo(Number(params.id))
+        .then((resumo) => {
+          setServiceSnapshot({
+            id: resumo.id,
+            os: resumo.os,
+            cliente: resumo.cliente,
+            sistema: resumo.sistema,
+          })
+        })
+        .catch((error) => {
+          console.log(error)
+        })
+    }
+  }, [flow.serviceId, hydratePersistedFlow, params.id, setServiceSnapshot])
 
-  function atualizarCodigoDocumento(tipoDocumento, tipoArquivo, value) {
-    atualizarConfiguracaoDocumento(tipoDocumento, (documentoAtual) => ({
-      ...documentoAtual,
-      [tipoArquivo]: value,
-    }))
-  }
+  const configuracaoAtual =
+    flow.modoCriacaoDocumentacao === 'agrupado'
+      ? flow.groupedDocuments
+      : flow.sistemas[activeSystemIndex]?.documentosQualificacao || {}
 
-  function alternarTipoDocumento(tipoDocumento) {
-    atualizarConfiguracaoDocumento(tipoDocumento, (documentoAtual) => {
-      const proximoAtivo = !documentoAtual.ativo
+  function updateDocumentConfig(typeId, updater) {
+    const currentValue = configuracaoAtual[typeId] || createEmptyDocumentSelection()
+    const nextValue = updater(currentValue)
 
-      return {
-        ...documentoAtual,
-        ativo: proximoAtivo,
-        protocoloSelecionado: proximoAtivo ? documentoAtual.protocoloSelecionado : false,
-        relatorioSelecionado: proximoAtivo ? documentoAtual.relatorioSelecionado : false,
-      }
+    updateDocumentSelection({
+      scope: flow.modoCriacaoDocumentacao === 'agrupado' ? 'grouped' : 'system',
+      index: activeSystemIndex,
+      typeId,
+      value: nextValue,
     })
   }
 
-  function alternarTipoArquivo(tipoDocumento, tipoArquivo) {
-    atualizarConfiguracaoDocumento(tipoDocumento, (documentoAtual) => {
-      if (!documentoAtual.ativo) {
-        return documentoAtual
-      }
-
-      return {
-        ...documentoAtual,
-        [tipoArquivo]: !documentoAtual[tipoArquivo],
-      }
-    })
-  }
-
-  function handleLogoChange(event) {
+  async function handleLogoChange(event) {
     const file = event.target.files?.[0]
 
     if (!file) {
-      atualizarLogoCliente('')
-      setErroLogo('')
+      setLogoCliente(null)
       return
     }
 
-    if (!TIPOS_LOGO_ACEITOS.includes(file.type)) {
-      setErroLogo('Envie uma imagem PNG ou JPG.')
-      event.target.value = ''
-      return
+    setLogoUploadStatus({ uploading: true, error: '' })
+
+    try {
+      const uploaded = await uploadClientLogo({
+        serviceId: Number(params.id),
+        file,
+        previousStoragePath: flow.dadosGerais.logoCliente?.storagePath || null,
+      })
+
+      setLogoCliente(uploaded)
+    } catch (error) {
+      console.log(error)
+      setLogoUploadStatus({
+        uploading: false,
+        error: error.message || 'Nao foi possivel enviar a logo.',
+      })
     }
-
-    const reader = new FileReader()
-
-    reader.onload = () => {
-      atualizarLogoCliente(String(reader.result || ''))
-      setErroLogo('')
-    }
-
-    reader.onerror = () => {
-      setErroLogo('Nao foi possivel ler a imagem selecionada.')
-    }
-
-    reader.readAsDataURL(file)
   }
 
-  function continuarParaResumo() {
-    const payloadFluxo = {
-      numeroSistemas,
-      modoCriacaoDocumentacao,
-      generalData,
-      systems,
-      groupedDocuments,
+  async function handleRemoveLogo() {
+    try {
+      setLogoUploadStatus({ uploading: true, error: '' })
+
+      if (flow.dadosGerais.logoCliente?.storagePath) {
+        await removeClientLogo(flow.dadosGerais.logoCliente.storagePath)
+      }
+
+      setLogoCliente(null)
+    } catch (error) {
+      console.log(error)
+      setLogoUploadStatus({
+        uploading: false,
+        error: error.message || 'Nao foi possivel remover a logo.',
+      })
     }
-
-    salvarFluxoQualificacaoLocal(params.id, payloadFluxo)
-
-    const paramsToSend = serializarFluxoQualificacao({
-      numeroSistemas,
-      modoCriacaoDocumentacao,
-      systems,
-      groupedDocuments,
-    })
-
-    router.push(`/dashboard/servico/${params.id}/documentacao/qualificacao?${paramsToSend.toString()}`)
   }
 
   return (
@@ -225,8 +134,9 @@ export default function DadosGeraisQualificacaoPage() {
         meta={
           <>
             <span className="badge badge--primary">Serviço #{params.id}</span>
-            <span className="badge">{numeroSistemas} sistemas</span>
-            <span className="badge">{formatarModoCriacaoDocumentacao(modoCriacaoDocumentacao)}</span>
+            <span className="badge">{flow.quantidadeSistemas} sistemas</span>
+            <span className="badge">{formatarModoCriacaoDocumentacao(flow.modoCriacaoDocumentacao)}</span>
+            {flow.os ? <span className="badge">OS {flow.os}</span> : null}
           </>
         }
       />
@@ -242,8 +152,8 @@ export default function DadosGeraisQualificacaoPage() {
                 <input
                   id="empresa-nome"
                   className="input"
-                  value={generalData.empresa.nome}
-                  onChange={(event) => atualizarCampo('empresa', { nome: event.target.value })}
+                  value={flow.dadosGerais.empresa.nome}
+                  onChange={(event) => updateGeneralData('empresa', { nome: event.target.value })}
                 />
               </Field>
 
@@ -251,8 +161,8 @@ export default function DadosGeraisQualificacaoPage() {
                 <input
                   id="empresa-endereco"
                   className="input"
-                  value={generalData.empresa.endereco}
-                  onChange={(event) => atualizarCampo('empresa', { endereco: event.target.value })}
+                  value={flow.dadosGerais.empresa.endereco}
+                  onChange={(event) => updateGeneralData('empresa', { endereco: event.target.value })}
                 />
               </Field>
 
@@ -260,8 +170,8 @@ export default function DadosGeraisQualificacaoPage() {
                 <input
                   id="empresa-cep"
                   className="input"
-                  value={generalData.empresa.cep}
-                  onChange={(event) => atualizarCampo('empresa', { cep: event.target.value })}
+                  value={flow.dadosGerais.empresa.cep}
+                  onChange={(event) => updateGeneralData('empresa', { cep: event.target.value })}
                 />
               </Field>
             </div>
@@ -273,8 +183,8 @@ export default function DadosGeraisQualificacaoPage() {
                 <input
                   id="elaborador-nome"
                   className="input"
-                  value={generalData.elaborador.nome}
-                  onChange={(event) => atualizarCampo('elaborador', { nome: event.target.value })}
+                  value={flow.dadosGerais.elaborador.nome}
+                  onChange={(event) => updateGeneralData('elaborador', { nome: event.target.value })}
                 />
               </Field>
 
@@ -282,8 +192,8 @@ export default function DadosGeraisQualificacaoPage() {
                 <input
                   id="elaborador-cargo"
                   className="input"
-                  value={generalData.elaborador.cargo}
-                  onChange={(event) => atualizarCampo('elaborador', { cargo: event.target.value })}
+                  value={flow.dadosGerais.elaborador.cargo}
+                  onChange={(event) => updateGeneralData('elaborador', { cargo: event.target.value })}
                 />
               </Field>
             </div>
@@ -295,8 +205,8 @@ export default function DadosGeraisQualificacaoPage() {
                 <input
                   id="revisor-nome"
                   className="input"
-                  value={generalData.revisor.nome}
-                  onChange={(event) => atualizarCampo('revisor', { nome: event.target.value })}
+                  value={flow.dadosGerais.revisor.nome}
+                  onChange={(event) => updateGeneralData('revisor', { nome: event.target.value })}
                 />
               </Field>
 
@@ -304,8 +214,8 @@ export default function DadosGeraisQualificacaoPage() {
                 <input
                   id="revisor-cargo"
                   className="input"
-                  value={generalData.revisor.cargo}
-                  onChange={(event) => atualizarCampo('revisor', { cargo: event.target.value })}
+                  value={flow.dadosGerais.revisor.cargo}
+                  onChange={(event) => updateGeneralData('revisor', { cargo: event.target.value })}
                 />
               </Field>
             </div>
@@ -317,8 +227,8 @@ export default function DadosGeraisQualificacaoPage() {
                 <input
                   id="aprovador-nome"
                   className="input"
-                  value={generalData.aprovador.nome}
-                  onChange={(event) => atualizarCampo('aprovador', { nome: event.target.value })}
+                  value={flow.dadosGerais.aprovador.nome}
+                  onChange={(event) => updateGeneralData('aprovador', { nome: event.target.value })}
                 />
               </Field>
 
@@ -326,8 +236,8 @@ export default function DadosGeraisQualificacaoPage() {
                 <input
                   id="aprovador-cargo"
                   className="input"
-                  value={generalData.aprovador.cargo}
-                  onChange={(event) => atualizarCampo('aprovador', { cargo: event.target.value })}
+                  value={flow.dadosGerais.aprovador.cargo}
+                  onChange={(event) => updateGeneralData('aprovador', { cargo: event.target.value })}
                 />
               </Field>
 
@@ -335,8 +245,8 @@ export default function DadosGeraisQualificacaoPage() {
                 <input
                   id="aprovador-telefone"
                   className="input"
-                  value={generalData.aprovador.telefone}
-                  onChange={(event) => atualizarCampo('aprovador', { telefone: event.target.value })}
+                  value={flow.dadosGerais.aprovador.telefone}
+                  onChange={(event) => updateGeneralData('aprovador', { telefone: event.target.value })}
                 />
               </Field>
 
@@ -345,8 +255,8 @@ export default function DadosGeraisQualificacaoPage() {
                   id="aprovador-email"
                   className="input"
                   type="email"
-                  value={generalData.aprovador.email}
-                  onChange={(event) => atualizarCampo('aprovador', { email: event.target.value })}
+                  value={flow.dadosGerais.aprovador.email}
+                  onChange={(event) => updateGeneralData('aprovador', { email: event.target.value })}
                 />
               </Field>
             </div>
@@ -354,36 +264,37 @@ export default function DadosGeraisQualificacaoPage() {
 
           <SectionFields
             title="Logo do Cliente"
-            description="Aceita PNG e JPG. A imagem fica com preview imediato e a referência segue para uso posterior no PDF."
+            description="Aceita PNG e JPG. A imagem é enviada ao Supabase Storage e reaproveitada depois no PDF."
           >
             <div className="stack">
-              <Field label="Upload da imagem" hint="Formatos aceitos: PNG e JPG">
+              <Field label="Upload da imagem" hint="Formatos aceitos: PNG e JPG, até 2 MB">
                 <input
                   id="logoCliente"
                   className="input input--file"
                   type="file"
                   accept=".png,.jpg,.jpeg,image/png,image/jpeg"
                   onChange={handleLogoChange}
+                  disabled={flow.logoUpload.uploading}
                 />
               </Field>
 
-              {erroLogo ? <p className="feedback-text feedback-text--error">{erroLogo}</p> : null}
+              {flow.logoUpload.error ? (
+                <p className="feedback-text feedback-text--error">{flow.logoUpload.error}</p>
+              ) : null}
 
-              {generalData.logoCliente ? (
+              {flow.logoUpload.uploading ? <p className="muted">Enviando logo...</p> : null}
+
+              {flow.dadosGerais.logoCliente?.publicUrl ? (
                 <div className="logo-preview-card">
                   <Image
-                    src={generalData.logoCliente}
+                    src={flow.dadosGerais.logoCliente.publicUrl}
                     alt="Preview da logo do cliente"
                     className="logo-preview-card__image"
                     width={280}
                     height={140}
                     unoptimized
                   />
-                  <button
-                    type="button"
-                    className="btn btn--ghost"
-                    onClick={() => atualizarLogoCliente('')}
-                  >
+                  <button type="button" className="btn btn--ghost" onClick={handleRemoveLogo}>
                     Remover logo
                   </button>
                 </div>
@@ -402,13 +313,13 @@ export default function DadosGeraisQualificacaoPage() {
             </div>
 
             <div className="form-grid">
-              {systems.map((system, index) => (
-                <Field key={system.systemNumber} label={`Sistema ${String(system.systemNumber).padStart(2, '0')}`}>
+              {flow.sistemas.map((system, index) => (
+                <Field key={system.localId} label={`Sistema ${String(system.systemNumber).padStart(2, '0')}`}>
                   <input
                     id={`system-name-${system.systemNumber}`}
                     className="input"
                     value={system.nome}
-                    onChange={(event) => atualizarNomeSistema(index, event.target.value)}
+                    onChange={(event) => updateSystemName(index, event.target.value)}
                   />
                 </Field>
               ))}
@@ -420,95 +331,118 @@ export default function DadosGeraisQualificacaoPage() {
               <div>
                 <h3 className="surface-card__title">Documentos da qualificação</h3>
                 <p className="surface-card__subtitle">
-                  {modoCriacaoDocumentacao === 'agrupado'
+                  {flow.modoCriacaoDocumentacao === 'agrupado'
                     ? 'A configuração abaixo será compartilhada por todos os sistemas informados.'
                     : 'Cada sistema mantém sua própria combinação de IQ, OQ, PQ, Protocolo e Relatório.'}
                 </p>
               </div>
             </div>
 
-            {modoCriacaoDocumentacao === 'por_sistema' ? (
+            {flow.modoCriacaoDocumentacao === 'por_sistema' ? (
               <div className="tabs-row" role="tablist" aria-label="Sistemas da qualificação">
-                {systems.map((system, index) => (
+                {flow.sistemas.map((system, index) => (
                   <button
-                    key={system.systemNumber}
+                    key={system.localId}
                     type="button"
                     role="tab"
                     aria-selected={activeSystemIndex === index}
                     className={`tab-button ${activeSystemIndex === index ? 'tab-button--active' : ''}`}
                     onClick={() => setActiveSystemIndex(index)}
                   >
-                    {system.nome || `Sistema ${String(system.systemNumber).padStart(2, '0')}`}
+                    {system.nome}
                   </button>
                 ))}
               </div>
             ) : (
               <div className="group-summary">
                 <span className="badge badge--primary">Modo agrupado</span>
-                <span className="muted">
-                  {systems.map((system) => system.nome || `Sistema ${system.systemNumber}`).join(' • ')}
-                </span>
+                <span className="muted">{flow.sistemas.map((system) => system.nome).join(' • ')}</span>
               </div>
             )}
 
             <div className="split-grid">
-              {TIPOS_QUALIFICACAO.map((tipoDocumento) => {
-                const documentoAtual = configuracaoAtual[tipoDocumento]
+              {qualificationTypeIds.map((typeId) => {
+                const currentValue = configuracaoAtual[typeId] || createEmptyDocumentSelection()
 
                 return (
-                  <div key={tipoDocumento} className="split-grid__side stack">
+                  <div key={typeId} className="split-grid__side stack">
                     <button
                       type="button"
-                      className={`option-card option-card--selectable ${documentoAtual.ativo ? 'option-card--active' : ''}`}
-                      onClick={() => alternarTipoDocumento(tipoDocumento)}
+                      className={`option-card option-card--selectable ${currentValue.ativo ? 'option-card--active' : ''}`}
+                      onClick={() =>
+                        updateDocumentConfig(typeId, (documentoAtual) => ({
+                          ...documentoAtual,
+                          ativo: !documentoAtual.ativo,
+                          protocoloSelecionado: !documentoAtual.ativo
+                            ? documentoAtual.protocoloSelecionado
+                            : false,
+                          relatorioSelecionado: !documentoAtual.ativo
+                            ? documentoAtual.relatorioSelecionado
+                            : false,
+                        }))
+                      }
                     >
-                      <span className="option-card__title">{formatarTipoQualificacao(tipoDocumento)}</span>
+                      <span className="option-card__title">{formatarTipoQualificacao(typeId)}</span>
                       <span className="option-card__description">
                         Selecione este tipo para habilitar Protocolo, Relatório ou ambos.
                       </span>
                     </button>
 
-                    {documentoAtual.ativo ? (
+                    {currentValue.ativo ? (
                       <SurfaceCard>
                         <div className="stack">
                           <div className="toggle-row">
                             <button
                               type="button"
-                              className={`toggle-chip ${documentoAtual.protocoloSelecionado ? 'toggle-chip--active' : ''}`}
-                              onClick={() => alternarTipoArquivo(tipoDocumento, 'protocoloSelecionado')}
+                              className={`toggle-chip ${currentValue.protocoloSelecionado ? 'toggle-chip--active' : ''}`}
+                              onClick={() =>
+                                updateDocumentConfig(typeId, (documentoAtual) => ({
+                                  ...documentoAtual,
+                                  protocoloSelecionado: !documentoAtual.protocoloSelecionado,
+                                }))
+                              }
                             >
                               Protocolo
                             </button>
                             <button
                               type="button"
-                              className={`toggle-chip ${documentoAtual.relatorioSelecionado ? 'toggle-chip--active' : ''}`}
-                              onClick={() => alternarTipoArquivo(tipoDocumento, 'relatorioSelecionado')}
+                              className={`toggle-chip ${currentValue.relatorioSelecionado ? 'toggle-chip--active' : ''}`}
+                              onClick={() =>
+                                updateDocumentConfig(typeId, (documentoAtual) => ({
+                                  ...documentoAtual,
+                                  relatorioSelecionado: !documentoAtual.relatorioSelecionado,
+                                }))
+                              }
                             >
                               Relatório
                             </button>
                           </div>
 
-                          {documentoAtual.protocoloSelecionado ? (
-                            <Field label={`Código do Protocolo de ${formatarTipoQualificacao(tipoDocumento)}`}>
+                          {currentValue.protocoloSelecionado ? (
+                            <Field label={`Código do Protocolo de ${formatarTipoQualificacao(typeId)}`}>
                               <input
-                                id={`${tipoDocumento}-protocolo-${modoCriacaoDocumentacao}-${sistemaAtual?.systemNumber || 'grupo'}`}
                                 className="input"
-                                value={documentoAtual.protocoloCodigo}
+                                value={currentValue.protocoloCodigo}
                                 onChange={(event) =>
-                                  atualizarCodigoDocumento(tipoDocumento, 'protocoloCodigo', event.target.value)
+                                  updateDocumentConfig(typeId, (documentoAtual) => ({
+                                    ...documentoAtual,
+                                    protocoloCodigo: event.target.value,
+                                  }))
                                 }
                               />
                             </Field>
                           ) : null}
 
-                          {documentoAtual.relatorioSelecionado ? (
-                            <Field label={`Código do Relatório de ${formatarTipoQualificacao(tipoDocumento)}`}>
+                          {currentValue.relatorioSelecionado ? (
+                            <Field label={`Código do Relatório de ${formatarTipoQualificacao(typeId)}`}>
                               <input
-                                id={`${tipoDocumento}-relatorio-${modoCriacaoDocumentacao}-${sistemaAtual?.systemNumber || 'grupo'}`}
                                 className="input"
-                                value={documentoAtual.relatorioCodigo}
+                                value={currentValue.relatorioCodigo}
                                 onChange={(event) =>
-                                  atualizarCodigoDocumento(tipoDocumento, 'relatorioCodigo', event.target.value)
+                                  updateDocumentConfig(typeId, (documentoAtual) => ({
+                                    ...documentoAtual,
+                                    relatorioCodigo: event.target.value,
+                                  }))
                                 }
                               />
                             </Field>
@@ -523,13 +457,10 @@ export default function DadosGeraisQualificacaoPage() {
           </div>
 
           <div className="form-actions">
-            <button className="btn btn--primary" onClick={continuarParaResumo}>
+            <button className="btn btn--primary" onClick={() => router.push(`/dashboard/servico/${params.id}/documentacao/qualificacao`)}>
               Continuar
             </button>
-            <button
-              className="btn btn--ghost"
-              onClick={() => router.push(`/dashboard/servico/${params.id}/documentacao`)}
-            >
+            <button className="btn btn--ghost" onClick={() => router.push(`/dashboard/servico/${params.id}/documentacao`)}>
               Voltar
             </button>
           </div>

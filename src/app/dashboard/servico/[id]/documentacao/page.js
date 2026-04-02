@@ -1,29 +1,50 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Field, PageHeader, PageShell, SurfaceCard } from '../../../../../components/ui'
-import {
-  formatarModoCriacaoDocumentacao,
-  MODOS_CRIACAO_DOCUMENTACAO,
-} from '../../../../../lib/qualificacao'
+import { fetchServicoResumo } from '@/features/documentacao/services/servicoResumoService'
+import { formatarModoCriacaoDocumentacao, MODOS_CRIACAO_DOCUMENTACAO } from '@/lib/qualificacao'
+import { useDocumentacaoFlowStore } from '@/stores/documentacao-flow-store'
 
 export default function DocumentacaoPage() {
   const params = useParams()
   const router = useRouter()
+  const { setServiceSnapshot, startFlow, state } = useDocumentacaoFlowStore()
   const [mostrarEtapaQualificacao, setMostrarEtapaQualificacao] = useState(false)
-  const [numeroSistemas, setNumeroSistemas] = useState('1')
+  const [numeroSistemas, setNumeroSistemas] = useState(String(state.quantidadeSistemas || 1))
   const [modoCriacaoDocumentacao, setModoCriacaoDocumentacao] = useState(
-    MODOS_CRIACAO_DOCUMENTACAO[0]
+    state.serviceId === Number(params.id)
+      ? state.modoCriacaoDocumentacao
+      : MODOS_CRIACAO_DOCUMENTACAO[0]
   )
   const [erroNumeroSistemas, setErroNumeroSistemas] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    async function carregarServico() {
+      try {
+        const resumo = await fetchServicoResumo(Number(params.id))
+        setServiceSnapshot({
+          id: resumo.id,
+          os: resumo.os,
+          cliente: resumo.cliente,
+          sistema: resumo.sistema,
+        })
+      } catch (error) {
+        console.log(error)
+      }
+    }
+
+    carregarServico()
+  }, [params.id, setServiceSnapshot])
 
   function abrirEtapaQualificacao() {
     setMostrarEtapaQualificacao(true)
     setErroNumeroSistemas('')
   }
 
-  function confirmarQualificacao() {
+  async function confirmarQualificacao() {
     const quantidade = Number(numeroSistemas)
 
     if (!numeroSistemas || Number.isNaN(quantidade) || quantidade < 1) {
@@ -31,12 +52,27 @@ export default function DocumentacaoPage() {
       return
     }
 
-    const paramsToSend = new URLSearchParams({
-      numeroSistemas: String(quantidade),
-      modoCriacaoDocumentacao,
-    })
+    setLoading(true)
 
-    router.push(`/dashboard/servico/${params.id}/documentacao/qualificacao/dados-gerais?${paramsToSend.toString()}`)
+    try {
+      const resumo = await fetchServicoResumo(Number(params.id))
+
+      startFlow({
+        serviceId: resumo.id,
+        os: resumo.os,
+        cliente: resumo.cliente,
+        quantidadeSistemas: quantidade,
+        modoCriacaoDocumentacao,
+        serviceSnapshot: resumo,
+      })
+
+      router.push(`/dashboard/servico/${params.id}/documentacao/qualificacao/dados-gerais`)
+    } catch (error) {
+      console.log(error)
+      setErroNumeroSistemas(error.message || 'Nao foi possivel iniciar o fluxo de qualificação.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -150,8 +186,8 @@ export default function DocumentacaoPage() {
             {erroNumeroSistemas ? <p className="muted">{erroNumeroSistemas}</p> : null}
 
             <div className="form-actions">
-              <button className="btn btn--primary" onClick={confirmarQualificacao}>
-                Continuar
+              <button className="btn btn--primary" onClick={confirmarQualificacao} disabled={loading}>
+                {loading ? 'Carregando...' : 'Continuar'}
               </button>
               <button
                 className="btn btn--ghost"
