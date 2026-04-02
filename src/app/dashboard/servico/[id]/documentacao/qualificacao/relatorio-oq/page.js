@@ -3,14 +3,17 @@
 import { useParams, useSearchParams } from 'next/navigation'
 import { useState } from 'react'
 import { Field, PageHeader, PageShell, SurfaceCard } from '../../../../../../../components/ui'
+import { carregarFluxoQualificacaoLocal } from '../../../../../../../lib/qualificacao-storage'
+import { normalizarGeneralData } from '../../../../../../../lib/qualificacao'
 
 export default function RelatorioOQPage() {
   const params = useParams()
   const searchParams = useSearchParams()
   const numeroSistemas = searchParams.get('numeroSistemas')
   const codigoDocumento = searchParams.get('codigoDocumento')
-  const cliente = searchParams.get('cliente')
-  const projeto = searchParams.get('projeto')
+  const fluxoPersistido =
+    typeof window === 'undefined' ? null : carregarFluxoQualificacaoLocal(params.id)
+  const [generalData] = useState(() => normalizarGeneralData(fluxoPersistido?.generalData || null))
 
   const [codigo, setCodigo] = useState('')
   const [elaborador, setElaborador] = useState('')
@@ -27,8 +30,8 @@ export default function RelatorioOQPage() {
             <span className="badge badge--primary">Serviço #{params.id}</span>
             {numeroSistemas ? <span className="badge">{numeroSistemas} sistemas</span> : null}
             {codigoDocumento ? <span className="badge">{codigoDocumento}</span> : null}
-            {cliente ? <span className="badge">{cliente}</span> : null}
-            {projeto ? <span className="badge">{projeto}</span> : null}
+            {generalData.empresa?.nome ? <span className="badge">{generalData.empresa.nome}</span> : null}
+            {generalData.elaborador?.nome ? <span className="badge">{generalData.elaborador.nome}</span> : null}
           </>
         }
       />

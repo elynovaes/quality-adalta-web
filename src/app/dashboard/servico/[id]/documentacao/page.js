@@ -3,12 +3,19 @@
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Field, PageHeader, PageShell, SurfaceCard } from '../../../../../components/ui'
+import {
+  formatarModoCriacaoDocumentacao,
+  MODOS_CRIACAO_DOCUMENTACAO,
+} from '../../../../../lib/qualificacao'
 
 export default function DocumentacaoPage() {
   const params = useParams()
   const router = useRouter()
   const [mostrarEtapaQualificacao, setMostrarEtapaQualificacao] = useState(false)
   const [numeroSistemas, setNumeroSistemas] = useState('1')
+  const [modoCriacaoDocumentacao, setModoCriacaoDocumentacao] = useState(
+    MODOS_CRIACAO_DOCUMENTACAO[0]
+  )
   const [erroNumeroSistemas, setErroNumeroSistemas] = useState('')
 
   function abrirEtapaQualificacao() {
@@ -24,9 +31,12 @@ export default function DocumentacaoPage() {
       return
     }
 
-    router.push(
-      `/dashboard/servico/${params.id}/documentacao/qualificacao/dados-gerais?numeroSistemas=${quantidade}`
-    )
+    const paramsToSend = new URLSearchParams({
+      numeroSistemas: String(quantidade),
+      modoCriacaoDocumentacao,
+    })
+
+    router.push(`/dashboard/servico/${params.id}/documentacao/qualificacao/dados-gerais?${paramsToSend.toString()}`)
   }
 
   return (
@@ -105,6 +115,37 @@ export default function DocumentacaoPage() {
                 }}
               />
             </Field>
+
+            <div className="stack">
+              <div className="surface-card__header">
+                <div>
+                  <h3 className="surface-card__title">Modo de criação das documentações</h3>
+                  <p className="surface-card__subtitle">
+                    Escolha se a qualificação será gerada em um conjunto único para todos os sistemas ou em trilhas independentes.
+                  </p>
+                </div>
+              </div>
+
+              <div className="option-grid">
+                {MODOS_CRIACAO_DOCUMENTACAO.map((modo) => (
+                  <button
+                    key={modo}
+                    type="button"
+                    className={`option-card option-card--selectable ${modoCriacaoDocumentacao === modo ? 'option-card--active' : ''}`}
+                    onClick={() => setModoCriacaoDocumentacao(modo)}
+                  >
+                    <span className="option-card__title">
+                      {formatarModoCriacaoDocumentacao(modo)}
+                    </span>
+                    <span className="option-card__description">
+                      {modo === 'agrupado'
+                        ? 'Um único conjunto de Protocolo e/ou Relatório será aplicado aos sistemas informados.'
+                        : 'Cada sistema terá seu próprio conjunto de documentos de qualificação.'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {erroNumeroSistemas ? <p className="muted">{erroNumeroSistemas}</p> : null}
 

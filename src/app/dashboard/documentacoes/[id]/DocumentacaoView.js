@@ -47,6 +47,14 @@ export default function DocumentacaoView({ dados }) {
           <>
             <span className="badge badge--primary">{dados.documentacao.categoria}</span>
             <span className="badge">{dados.documentacao.tipo}</span>
+            <span className="badge">{dados.documentacao.modo_criacao_documentacao || 'por_sistema'}</span>
+            <span className="badge">
+              {dados.sistemas?.length
+                ? dados.sistemas.map((sistema) => sistema.nome).join(', ')
+                : dados.documentacao.sistema_id
+                  ? `Sistema #${dados.documentacao.sistema_id}`
+                  : 'Todos os sistemas'}
+            </span>
             <span className="badge">{dados.anexos.length} anexos</span>
           </>
         }

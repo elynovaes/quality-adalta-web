@@ -16,6 +16,49 @@ async function buscarEstruturaDocumentacao(documentacaoId) {
   }
 
   const documentacao = docs[0];
+  let sistemas = [];
+
+  try {
+    const { data: vinculos, error: erroVinculos } = await supabase
+      .from('documentacao_sistemas')
+      .select('sistema_id')
+      .eq('documentacao_id', documentacaoId);
+
+    if (erroVinculos) {
+      throw erroVinculos;
+    }
+
+    const sistemaIds = (vinculos || []).map((item) => item.sistema_id);
+
+    if (sistemaIds.length > 0) {
+      const { data: sistemasData, error: erroSistemas } = await supabase
+        .from('sistemas')
+        .select('id, nome')
+        .in('id', sistemaIds);
+
+      if (erroSistemas) {
+        throw new Error(`Erro ao buscar sistemas da documentação: ${erroSistemas.message}`);
+      }
+
+      sistemas = sistemasData || [];
+    }
+  } catch (error) {
+    if (documentacao.sistema_id) {
+      const { data: sistemaData, error: erroSistema } = await supabase
+        .from('sistemas')
+        .select('id, nome')
+        .eq('id', documentacao.sistema_id)
+        .maybeSingle();
+
+      if (erroSistema) {
+        throw new Error(`Erro ao buscar sistema da documentação: ${erroSistema.message}`);
+      }
+
+      sistemas = sistemaData ? [sistemaData] : [];
+    } else {
+      console.log(error);
+    }
+  }
 
   const { data: anexos, error: erroAnexos } = await supabase
     .from('anexos')
@@ -71,6 +114,7 @@ async function buscarEstruturaDocumentacao(documentacaoId) {
 
   return {
     documentacao,
+    sistemas,
     anexos: anexosComEstrutura,
   };
 }
