@@ -5,7 +5,10 @@ import { useParams } from 'next/navigation'
 import { supabase } from '../../../../lib/supabase'
 import { useRouter } from 'next/navigation'
 import { Field, PageHeader, PageShell, SurfaceCard } from '../../../../components/ui'
-import { deleteDocumentacaoById } from '@/features/documentacao/services/documentacaoReadService'
+import {
+  deleteDocumentacaoById,
+  updateDocumentacaoCode,
+} from '@/features/documentacao/services/documentacaoReadService'
 import {
   fetchServiceGeneralData,
   updateServiceGeneralData,
@@ -22,6 +25,9 @@ export default function ServicoDetalhe() {
   const [erroDadosGerais, setErroDadosGerais] = useState('')
   const [dadosGeraisExpanded, setDadosGeraisExpanded] = useState(false)
   const [deletingDocumentacaoId, setDeletingDocumentacaoId] = useState(null)
+  const [editingCodigoId, setEditingCodigoId] = useState(null)
+  const [codigoDraft, setCodigoDraft] = useState('')
+  const [savingCodigoId, setSavingCodigoId] = useState(null)
   const [erroDocumentacoes, setErroDocumentacoes] = useState('')
   const currentServiceId = Number(params.id)
 
@@ -154,6 +160,38 @@ export default function ServicoDetalhe() {
     }
   }
 
+  function iniciarEdicaoCodigo(documentacao) {
+    setEditingCodigoId(documentacao.id)
+    setCodigoDraft(documentacao.codigo || '')
+    setErroDocumentacoes('')
+  }
+
+  async function salvarCodigoDocumentacao(documentacaoId) {
+    try {
+      setSavingCodigoId(documentacaoId)
+      setErroDocumentacoes('')
+      const updated = await updateDocumentacaoCode(documentacaoId, codigoDraft)
+
+      setDocumentacoes((current) =>
+        current.map((item) =>
+          item.id === documentacaoId
+            ? {
+                ...item,
+                codigo: updated.codigo,
+              }
+            : item
+        )
+      )
+      setEditingCodigoId(null)
+      setCodigoDraft('')
+    } catch (error) {
+      console.log(error)
+      setErroDocumentacoes(error.message || 'Nao foi possivel atualizar o código da documentação.')
+    } finally {
+      setSavingCodigoId(null)
+    }
+  }
+
   if (!servico) {
     return (
       <PageShell>
@@ -246,26 +284,77 @@ export default function ServicoDetalhe() {
                   <div key={documentacao.id} className="plan-item">
                     <div>
                       <strong>{documentacao.titulo || `Documentação #${documentacao.id}`}</strong>
-                      <p className="muted">
-                        {documentacao.categoria || 'Sem categoria'}
-                        {documentacao.tipo ? ` • ${documentacao.tipo}` : ''}
-                        {documentacao.codigo ? ` • ${documentacao.codigo}` : ''}
-                        {documentacao.modo_criacao_documentacao
-                          ? ` • ${documentacao.modo_criacao_documentacao}`
-                          : ''}
-                      </p>
+                      {editingCodigoId === documentacao.id ? (
+                        <div className="stack">
+                          <Field label="Código">
+                            <input
+                              className="input"
+                              value={codigoDraft}
+                              onChange={(event) => setCodigoDraft(event.target.value)}
+                            />
+                          </Field>
+                          <p className="muted">
+                            {documentacao.categoria || 'Sem categoria'}
+                            {documentacao.tipo ? ` • ${documentacao.tipo}` : ''}
+                            {documentacao.modo_criacao_documentacao
+                              ? ` • ${documentacao.modo_criacao_documentacao}`
+                              : ''}
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="muted">
+                          {documentacao.categoria || 'Sem categoria'}
+                          {documentacao.tipo ? ` • ${documentacao.tipo}` : ''}
+                          {documentacao.codigo ? ` • ${documentacao.codigo}` : ''}
+                          {documentacao.modo_criacao_documentacao
+                            ? ` • ${documentacao.modo_criacao_documentacao}`
+                            : ''}
+                        </p>
+                      )}
                     </div>
                     <div className="cluster">
+                      {editingCodigoId === documentacao.id ? (
+                        <>
+                          <button
+                            className="btn btn--primary"
+                            onClick={() => salvarCodigoDocumentacao(documentacao.id)}
+                            disabled={savingCodigoId === documentacao.id}
+                          >
+                            {savingCodigoId === documentacao.id ? 'Salvando...' : 'Salvar código'}
+                          </button>
+                          <button
+                            className="btn btn--ghost"
+                            onClick={() => {
+                              setEditingCodigoId(null)
+                              setCodigoDraft('')
+                            }}
+                            disabled={savingCodigoId === documentacao.id}
+                          >
+                            Cancelar
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="btn btn--ghost"
+                          onClick={() => iniciarEdicaoCodigo(documentacao)}
+                        >
+                          Editar código
+                        </button>
+                      )}
                       <button
                         className="btn btn--secondary"
                         onClick={() => router.push(`/dashboard/documentacoes/${documentacao.id}`)}
+                        disabled={editingCodigoId === documentacao.id}
                       >
                         Abrir documentação
                       </button>
                       <button
                         className="btn btn--danger"
                         onClick={() => excluirDocumentacao(documentacao.id)}
-                        disabled={deletingDocumentacaoId === documentacao.id}
+                        disabled={
+                          deletingDocumentacaoId === documentacao.id ||
+                          editingCodigoId === documentacao.id
+                        }
                       >
                         {deletingDocumentacaoId === documentacao.id ? 'Excluindo...' : 'Excluir'}
                       </button>

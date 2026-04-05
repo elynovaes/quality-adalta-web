@@ -297,3 +297,19 @@ export async function deleteDocumentacaoById(documentacaoId) {
 
   return data[0]
 }
+
+export async function updateDocumentacaoCode(documentacaoId, codigo) {
+  const normalizedCode = (codigo || '').trim()
+  const { data, error } = await supabase
+    .from('documentacoes')
+    .update({ codigo: normalizedCode || null })
+    .eq('id', documentacaoId)
+    .select('id, codigo')
+    .single()
+
+  if (error) {
+    throw new Error(`Erro ao atualizar código da documentação ${documentacaoId}: ${error.message}`)
+  }
+
+  return data
+}
