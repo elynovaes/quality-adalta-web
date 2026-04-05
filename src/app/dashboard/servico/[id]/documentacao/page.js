@@ -81,6 +81,14 @@ export default function DocumentacaoPage() {
         eyebrow="Documentação"
         title="Documentação do serviço"
         description="Selecione a categoria de documentação que deseja abrir para o serviço atual."
+        actions={
+          <button
+            className="btn btn--secondary"
+            onClick={() => router.push(`/dashboard/servico/${params.id}`)}
+          >
+            Voltar
+          </button>
+        }
         meta={<span className="badge badge--primary">Serviço #{params.id}</span>}
       />
 

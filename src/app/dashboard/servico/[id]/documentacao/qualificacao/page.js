@@ -18,22 +18,40 @@ export default function QualificacaoPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
+  const currentServiceId = Number(params.id)
 
   useEffect(() => {
-    if (flow.serviceId === Number(params.id)) {
+    if (flow.serviceId === currentServiceId) {
       return
     }
 
-    const hydrated = hydratePersistedFlow(Number(params.id))
+    const hydrated = hydratePersistedFlow(currentServiceId)
 
-    if (!hydrated) {
-      fetchServicoResumo(Number(params.id))
-        .then((resumo) => setServiceSnapshot({ id: resumo.id, os: resumo.os, cliente: resumo.cliente, sistema: resumo.sistema }))
-        .catch((fetchError) => {
-          console.log(fetchError)
-        })
+    if (hydrated) {
+      return
     }
-  }, [flow.serviceId, hydratePersistedFlow, params.id, setServiceSnapshot])
+
+    router.replace(`/dashboard/servico/${currentServiceId}/documentacao`)
+  }, [currentServiceId, flow.serviceId, hydratePersistedFlow, router])
+
+  useEffect(() => {
+    if (flow.serviceId !== currentServiceId || flow.os) {
+      return
+    }
+
+    fetchServicoResumo(currentServiceId)
+      .then((resumo) =>
+        setServiceSnapshot({
+          id: resumo.id,
+          os: resumo.os,
+          cliente: resumo.cliente,
+          sistema: resumo.sistema,
+        })
+      )
+      .catch((fetchError) => {
+        console.log(fetchError)
+      })
+  }, [currentServiceId, flow.os, flow.serviceId, setServiceSnapshot])
 
   async function handleCreateDocumentacoes() {
     if (flow.totalDocuments === 0) {
@@ -54,6 +72,16 @@ export default function QualificacaoPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  if (flow.serviceId !== currentServiceId) {
+    return (
+      <PageShell narrow>
+        <SurfaceCard>
+          <span className="muted">Validando fluxo da qualificação...</span>
+        </SurfaceCard>
+      </PageShell>
+    )
   }
 
   return (

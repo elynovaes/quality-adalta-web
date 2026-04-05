@@ -39,29 +39,50 @@ export default function DadosGeraisQualificacaoPage() {
   } = useDocumentacaoFlowStore()
   const flow = useDocumentacaoFlowViewModel()
   const [activeSystemIndex, setActiveSystemIndex] = useState(0)
+  const currentServiceId = Number(params.id)
 
   useEffect(() => {
-    if (flow.serviceId === Number(params.id)) {
+    if (flow.serviceId === currentServiceId) {
       return
     }
 
-    const hydrated = hydratePersistedFlow(Number(params.id))
+    const hydrated = hydratePersistedFlow(currentServiceId)
 
-    if (!hydrated) {
-      fetchServicoResumo(Number(params.id))
-        .then((resumo) => {
-          setServiceSnapshot({
-            id: resumo.id,
-            os: resumo.os,
-            cliente: resumo.cliente,
-            sistema: resumo.sistema,
-          })
-        })
-        .catch((error) => {
-          console.log(error)
-        })
+    if (hydrated) {
+      return
     }
-  }, [flow.serviceId, hydratePersistedFlow, params.id, setServiceSnapshot])
+
+    router.replace(`/dashboard/servico/${currentServiceId}/documentacao`)
+  }, [currentServiceId, flow.serviceId, hydratePersistedFlow, router])
+
+  useEffect(() => {
+    if (flow.serviceId !== currentServiceId || flow.os) {
+      return
+    }
+
+    fetchServicoResumo(currentServiceId)
+      .then((resumo) => {
+        setServiceSnapshot({
+          id: resumo.id,
+          os: resumo.os,
+          cliente: resumo.cliente,
+          sistema: resumo.sistema,
+        })
+      })
+      .catch((error) => {
+        console.log(error)
+      })
+  }, [currentServiceId, flow.os, flow.serviceId, setServiceSnapshot])
+
+  if (flow.serviceId !== currentServiceId) {
+    return (
+      <PageShell narrow>
+        <SurfaceCard>
+          <span className="muted">Validando fluxo da qualificação...</span>
+        </SurfaceCard>
+      </PageShell>
+    )
+  }
 
   const configuracaoAtual =
     flow.modoCriacaoDocumentacao === 'agrupado'
