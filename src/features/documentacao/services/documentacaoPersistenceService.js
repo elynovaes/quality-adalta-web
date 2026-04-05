@@ -242,6 +242,44 @@ async function syncDocumentacaoSystems(documentacaoId, systemIds) {
   return true
 }
 
+async function listDocumentacaoAnexos(documentacaoId) {
+  const { data, error } = await supabase
+    .from('anexos')
+    .select('id')
+    .eq('documentacao_id', documentacaoId)
+
+  if (error) {
+    throw new Error(`Erro ao consultar anexos da documentação ${documentacaoId}: ${error.message}`)
+  }
+
+  return data || []
+}
+
+async function createDocumentacaoAnexosFromModel(documentacaoId, attachments) {
+  if (!attachments || attachments.length === 0) {
+    return
+  }
+
+  const currentAnexos = await listDocumentacaoAnexos(documentacaoId)
+
+  if (currentAnexos.length > 0) {
+    return
+  }
+
+  const payload = attachments.map((attachment, index) => ({
+    documentacao_id: documentacaoId,
+    nome: attachment.nome,
+    descricao: attachment.descricao || null,
+    ordem: attachment.ordem || index + 1,
+  }))
+
+  const { error } = await supabase.from('anexos').insert(payload)
+
+  if (error) {
+    throw new Error(`Erro ao criar anexos da documentação ${documentacaoId}: ${error.message}`)
+  }
+}
+
 export async function persistDocumentacaoFlow(flowState) {
   const persistenceModel = mapFlowToPersistenceModel(flowState)
   const persistedSystems = await syncServiceSystems(flowState.serviceId, flowState.sistemas)
@@ -289,6 +327,10 @@ export async function persistDocumentacaoFlow(flowState) {
 
       const saved = await saveDocumentacao(payload, existingId)
       await syncDocumentacaoSystems(saved.id, systemIds)
+      await createDocumentacaoAnexosFromModel(
+        saved.id,
+        flowState.modeloAnexosSelecionados?.[document.qualificationTypeId] || []
+      )
 
       savedDocumentacoes.push({
         ...saved,

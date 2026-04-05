@@ -28,6 +28,16 @@ export function normalizeDocumentConfiguration(data = {}) {
   }, {})
 }
 
+export function normalizeTemplateAttachmentSelections(data = null) {
+  const source = data || {}
+
+  return {
+    iq: Array.isArray(source.iq) ? source.iq : [],
+    oq: Array.isArray(source.oq) ? source.oq : [],
+    pq: Array.isArray(source.pq) ? source.pq : [],
+  }
+}
+
 export function normalizeGeneralData(data = null) {
   const source = data || {}
   const empresa = source?.empresa || {}

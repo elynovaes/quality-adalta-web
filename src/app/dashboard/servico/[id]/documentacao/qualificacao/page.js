@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { EmptyState, PageHeader, PageShell, SurfaceCard } from '@/components/ui'
 import { formatarModoCriacaoDocumentacao } from '@/lib/qualificacao'
 import { formatDocumentType, formatQualificationType } from '@/features/documentacao/config/qualificationConfig'
+import { fetchAttachmentsForQualification } from '@/features/documentacao/services/documentacaoModelService'
 import { persistDocumentacaoFlow } from '@/features/documentacao/services/documentacaoPersistenceService'
 import { fetchServicoResumo } from '@/features/documentacao/services/servicoResumoService'
 import { useDocumentacaoFlowStore, useDocumentacaoFlowViewModel } from '@/stores/documentacao-flow-store'
@@ -13,11 +14,17 @@ import { useDocumentacaoFlowStore, useDocumentacaoFlowViewModel } from '@/stores
 export default function QualificacaoPage() {
   const params = useParams()
   const router = useRouter()
-  const { hydratePersistedFlow, setServiceSnapshot, setPersistenceResult } = useDocumentacaoFlowStore()
+  const {
+    hydratePersistedFlow,
+    setServiceSnapshot,
+    setPersistenceResult,
+    setTemplateAttachments,
+  } = useDocumentacaoFlowStore()
   const flow = useDocumentacaoFlowViewModel()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
+  const [modelAttachments, setModelAttachments] = useState({})
   const currentServiceId = Number(params.id)
 
   useEffect(() => {
@@ -52,6 +59,69 @@ export default function QualificacaoPage() {
         console.log(fetchError)
       })
   }, [currentServiceId, flow.os, flow.serviceId, setServiceSnapshot])
+
+  useEffect(() => {
+    let cancelled = false
+    const selectedQualificationTypes = Array.from(
+      new Set(
+        flow.plan.flatMap((group) =>
+          group.documentos.map((document) => document.qualificationTypeId)
+        )
+      )
+    )
+
+    async function loadModelAttachments() {
+      if (selectedQualificationTypes.length === 0) {
+        if (!cancelled) {
+          setModelAttachments({})
+        }
+        return
+      }
+
+      try {
+        const entries = await Promise.all(
+          selectedQualificationTypes.map(async (qualificationTypeId) => [
+            qualificationTypeId,
+            await fetchAttachmentsForQualification({
+              modalidade: flow.modalidadeQualificacao,
+              qualificationType: qualificationTypeId.toUpperCase(),
+            }),
+          ])
+        )
+
+        if (cancelled) {
+          return
+        }
+
+        const nextAttachments = Object.fromEntries(entries)
+        setModelAttachments(nextAttachments)
+
+        for (const [qualificationTypeId, attachments] of entries) {
+          if (
+            attachments.length > 0 &&
+            (flow.modeloAnexosSelecionados?.[qualificationTypeId] || []).length === 0
+          ) {
+            setTemplateAttachments(qualificationTypeId, attachments)
+          }
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          console.log(loadError)
+        }
+      }
+    }
+
+    loadModelAttachments()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    flow.modalidadeQualificacao,
+    flow.modeloAnexosSelecionados,
+    flow.plan,
+    setTemplateAttachments,
+  ])
 
   async function handleCreateDocumentacoes() {
     if (flow.totalDocuments === 0) {
@@ -154,6 +224,69 @@ export default function QualificacaoPage() {
           )}
 
           {error ? <p className="feedback-text feedback-text--error">{error}</p> : null}
+
+          {Object.entries(modelAttachments).some(([, attachments]) => attachments.length > 0) ? (
+            <div className="stack-lg">
+              <div className="surface-card__header">
+                <div>
+                  <h3 className="surface-card__title">Anexos do modelo</h3>
+                  <p className="surface-card__subtitle">
+                    Escolha quais anexos do modelo de {flow.modalidadeQualificacao} entrarão em cada etapa da documentação.
+                  </p>
+                </div>
+              </div>
+
+              {Object.entries(modelAttachments).map(([qualificationTypeId, attachments]) => {
+                if (attachments.length === 0) {
+                  return null
+                }
+
+                const selectedAttachments = flow.modeloAnexosSelecionados?.[qualificationTypeId] || []
+
+                return (
+                  <SurfaceCard key={qualificationTypeId}>
+                    <div className="surface-card__header">
+                      <div>
+                        <h4 className="surface-card__title">
+                          {flow.modalidadeQualificacao} {formatQualificationType(qualificationTypeId)}
+                        </h4>
+                        <p className="surface-card__subtitle">
+                          Marque os anexos que devem ser clonados do modelo para a documentação final.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="stack">
+                      {attachments.map((attachment) => {
+                        const checked = selectedAttachments.some(
+                          (item) => item.nome === attachment.nome
+                        )
+
+                        return (
+                          <label key={attachment.nome} className="checkbox-field">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(event) => {
+                                const nextAttachments = event.target.checked
+                                  ? [...selectedAttachments, attachment]
+                                  : selectedAttachments.filter(
+                                      (item) => item.nome !== attachment.nome
+                                    )
+
+                                setTemplateAttachments(qualificationTypeId, nextAttachments)
+                              }}
+                            />
+                            <span>{attachment.nome}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </SurfaceCard>
+                )
+              })}
+            </div>
+          ) : null}
 
           <div className="form-actions">
             <button className="btn btn--primary" onClick={handleCreateDocumentacoes} disabled={loading}>

@@ -54,6 +54,7 @@ export function createInitialDocumentacaoFlowState(documentsFactory) {
     serviceId: null,
     os: '',
     cliente: '',
+    modalidadeQualificacao: 'HVAC',
     quantidadeSistemas: 1,
     sistemas: [createSystemDraft(0, documentsFactory)],
     modoCriacaoDocumentacao: MODO_CRIACAO_DOCUMENTACAO.AGRUPADO,
@@ -70,6 +71,11 @@ export function createInitialDocumentacaoFlowState(documentsFactory) {
     dadosGerais: createEmptyGeneralData(),
     resumoCriacao: null,
     documentacaoIds: [],
+    modeloAnexosSelecionados: {
+      iq: [],
+      oq: [],
+      pq: [],
+    },
     serviceSnapshot: null,
     logoUpload: {
       uploading: false,

@@ -1,7 +1,7 @@
 'use client'
 
 import { createContext, useContext, useEffect, useMemo, useReducer } from 'react'
-import { buildResumeViewModel, createInitialFlowState, normalizeDocumentConfiguration, normalizeGeneralData, normalizeSystemDraft, summarizeSelections, applySystemCount } from '@/features/documentacao/mappers/documentacaoFlowMappers'
+import { buildResumeViewModel, createInitialFlowState, normalizeDocumentConfiguration, normalizeGeneralData, normalizeSystemDraft, summarizeSelections, applySystemCount, normalizeTemplateAttachmentSelections } from '@/features/documentacao/mappers/documentacaoFlowMappers'
 import { buildDocumentationSet } from '@/features/documentacao/utils/buildDocumentationSet'
 import { MODO_CRIACAO_DOCUMENTACAO } from '@/types/documentacao-flow'
 
@@ -70,6 +70,8 @@ function hydrateState(data) {
     dadosGerais: normalizeGeneralData(data?.dadosGerais),
     serviceSnapshot: data?.serviceSnapshot || null,
     documentacaoIds: data?.documentacaoIds || [],
+    modalidadeQualificacao: data?.modalidadeQualificacao || initial.modalidadeQualificacao,
+    modeloAnexosSelecionados: normalizeTemplateAttachmentSelections(data?.modeloAnexosSelecionados),
     logoUpload: {
       uploading: false,
       error: '',
@@ -122,6 +124,12 @@ function reducer(state, action) {
       return computeDerivedState({
         ...state,
         modoCriacaoDocumentacao: action.payload,
+      })
+
+    case 'SET_QUALIFICATION_MODALITY':
+      return computeDerivedState({
+        ...state,
+        modalidadeQualificacao: action.payload,
       })
 
     case 'UPDATE_SYSTEM_NAME':
@@ -200,6 +208,15 @@ function reducer(state, action) {
         documentacaoIds: action.payload.documentacaoIds || [],
       })
 
+    case 'SET_TEMPLATE_ATTACHMENTS':
+      return computeDerivedState({
+        ...state,
+        modeloAnexosSelecionados: {
+          ...state.modeloAnexosSelecionados,
+          [action.payload.qualificationTypeId]: action.payload.attachments,
+        },
+      })
+
     case 'RESET_FLOW':
       return createInitialFlowState()
 
@@ -261,6 +278,9 @@ export function useDocumentacaoFlowStore() {
       setCreationMode(value) {
         dispatch({ type: 'SET_CREATION_MODE', payload: value })
       },
+      setQualificationModality(value) {
+        dispatch({ type: 'SET_QUALIFICATION_MODALITY', payload: value })
+      },
       updateSystemName(index, nome) {
         dispatch({ type: 'UPDATE_SYSTEM_NAME', payload: { index, nome } })
       },
@@ -281,6 +301,12 @@ export function useDocumentacaoFlowStore() {
       },
       setPersistenceResult(payload) {
         dispatch({ type: 'SET_PERSISTENCE_RESULT', payload })
+      },
+      setTemplateAttachments(qualificationTypeId, attachments) {
+        dispatch({
+          type: 'SET_TEMPLATE_ATTACHMENTS',
+          payload: { qualificationTypeId, attachments },
+        })
       },
       resetFlow() {
         dispatch({ type: 'RESET_FLOW' })

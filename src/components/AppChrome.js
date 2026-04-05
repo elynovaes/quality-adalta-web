@@ -22,9 +22,9 @@ const PRIMARY_ITEMS = [
   },
   {
     label: 'Documentações',
-    href: '/dashboard',
+    href: '/dashboard/documentacoes',
     match: '/documentacoes',
-    available: false,
+    available: true,
     icon: DocumentationIcon,
   },
 ]
