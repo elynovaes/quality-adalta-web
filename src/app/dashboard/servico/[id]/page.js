@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation'
 import { supabase } from '../../../../lib/supabase'
 import { useRouter } from 'next/navigation'
 import { Field, PageHeader, PageShell, SurfaceCard } from '../../../../components/ui'
+import { ConfirmDialog } from '../../../../components/AppDialog'
 import {
   deleteDocumentacaoById,
   updateDocumentacaoCode,
@@ -29,6 +30,7 @@ export default function ServicoDetalhe() {
   const [codigoDraft, setCodigoDraft] = useState('')
   const [savingCodigoId, setSavingCodigoId] = useState(null)
   const [erroDocumentacoes, setErroDocumentacoes] = useState('')
+  const [confirmDeleteDocumentacaoId, setConfirmDeleteDocumentacaoId] = useState(null)
   const currentServiceId = Number(params.id)
 
   const router = useRouter()
@@ -131,9 +133,13 @@ export default function ServicoDetalhe() {
   }
 
   async function excluirDocumentacao(documentacaoId) {
-    const confirmou = window.confirm('Tem certeza que deseja excluir esta documentação?')
+    setConfirmDeleteDocumentacaoId(documentacaoId)
+  }
 
-    if (!confirmou) {
+  async function confirmarExclusaoDocumentacao() {
+    const documentacaoId = confirmDeleteDocumentacaoId
+
+    if (!documentacaoId) {
       return
     }
 
@@ -152,6 +158,7 @@ export default function ServicoDetalhe() {
         setDadosGeraisForm(loaded)
         setEditandoDadosGerais(false)
       }
+      setConfirmDeleteDocumentacaoId(null)
     } catch (error) {
       console.log(error)
       setErroDocumentacoes(error.message || 'Nao foi possivel excluir a documentação.')
@@ -204,20 +211,23 @@ export default function ServicoDetalhe() {
 
   return (
     <PageShell>
+      <ConfirmDialog
+        open={Boolean(confirmDeleteDocumentacaoId)}
+        title="Excluir documentação"
+        description="Essa documentação será removida do serviço e deixará de aparecer na lista."
+        confirmLabel="Excluir documentação"
+        busy={Boolean(deletingDocumentacaoId)}
+        onClose={() => setConfirmDeleteDocumentacaoId(null)}
+        onConfirm={confirmarExclusaoDocumentacao}
+      />
+
       <PageHeader
-        eyebrow="Serviço"
-        title={`Detalhes do serviço #${servico.id}`}
+        title={`Detalhes do Serviço - OS ${servico.os || servico.id}`}
         description="Visualize os dados do serviço e siga para as etapas de documentação disponíveis."
         actions={
           <button className="btn btn--secondary" onClick={() => router.push('/dashboard')}>
             Voltar
           </button>
-        }
-        meta={
-          <>
-            <span className="badge badge--primary">OS {servico.os || '-'}</span>
-            <span className="badge">{servico.client || 'Cliente não informado'}</span>
-          </>
         }
       />
 
@@ -234,10 +244,6 @@ export default function ServicoDetalhe() {
             </div>
 
             <div className="data-list">
-              <div className="data-row">
-                <span className="data-row__label">ID</span>
-                <span className="data-row__value">{servico.id}</span>
-              </div>
               <div className="data-row">
                 <span className="data-row__label">OS</span>
                 <span className="data-row__value">{servico.os}</span>
@@ -563,9 +569,6 @@ export default function ServicoDetalhe() {
             <div className="surface-card__header">
               <div>
                 <h2 className="surface-card__title">Ações</h2>
-                <p className="surface-card__subtitle">
-                  Atalhos para os próximos passos relacionados ao serviço.
-                </p>
               </div>
             </div>
 

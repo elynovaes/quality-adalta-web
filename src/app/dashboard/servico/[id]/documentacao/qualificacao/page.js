@@ -25,6 +25,7 @@ export default function QualificacaoPage() {
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
   const [modelAttachments, setModelAttachments] = useState({})
+  const [loadingModelAttachments, setLoadingModelAttachments] = useState(false)
   const currentServiceId = Number(params.id)
 
   useEffect(() => {
@@ -79,6 +80,10 @@ export default function QualificacaoPage() {
       }
 
       try {
+        if (!cancelled) {
+          setLoadingModelAttachments(true)
+        }
+
         const entries = await Promise.all(
           selectedQualificationTypes.map(async (qualificationTypeId) => [
             qualificationTypeId,
@@ -108,6 +113,10 @@ export default function QualificacaoPage() {
         if (!cancelled) {
           console.log(loadError)
         }
+      } finally {
+        if (!cancelled) {
+          setLoadingModelAttachments(false)
+        }
       }
     }
 
@@ -123,6 +132,50 @@ export default function QualificacaoPage() {
     setTemplateAttachments,
   ])
 
+  async function resolveModelAttachmentsForCreation() {
+    const selectedQualificationTypes = Array.from(
+      new Set(
+        flow.plan.flatMap((group) =>
+          group.documentos.map((document) => document.qualificationTypeId)
+        )
+      )
+    )
+
+    const resolvedEntries = await Promise.all(
+      selectedQualificationTypes.map(async (qualificationTypeId) => {
+        const existingAttachments = modelAttachments[qualificationTypeId]
+
+        if (Array.isArray(existingAttachments) && existingAttachments.length > 0) {
+          return [qualificationTypeId, existingAttachments]
+        }
+
+        const loadedAttachments = await fetchAttachmentsForQualification({
+          modalidade: flow.modalidadeQualificacao,
+          qualificationType: qualificationTypeId.toUpperCase(),
+        })
+
+        return [qualificationTypeId, loadedAttachments]
+      })
+    )
+
+    const resolvedMap = Object.fromEntries(resolvedEntries)
+
+    setModelAttachments((current) => ({
+      ...current,
+      ...resolvedMap,
+    }))
+
+    return selectedQualificationTypes.reduce((acc, qualificationTypeId) => {
+      const currentSelection = flow.modeloAnexosSelecionados?.[qualificationTypeId] || []
+      const availableAttachments = resolvedMap[qualificationTypeId] || []
+
+      acc[qualificationTypeId] =
+        currentSelection.length > 0 ? currentSelection : availableAttachments
+
+      return acc
+    }, {})
+  }
+
   async function handleCreateDocumentacoes() {
     if (flow.totalDocuments === 0) {
       setError('Selecione ao menos um módulo e um tipo de documento antes de criar as documentações.')
@@ -133,7 +186,21 @@ export default function QualificacaoPage() {
     setError('')
 
     try {
-      const persisted = await persistDocumentacaoFlow(flow)
+      const resolvedTemplateAttachments = await resolveModelAttachmentsForCreation()
+      const persisted = await persistDocumentacaoFlow({
+        ...flow,
+        modeloAnexosSelecionados: {
+          ...flow.modeloAnexosSelecionados,
+          ...resolvedTemplateAttachments,
+        },
+      })
+
+      for (const [qualificationTypeId, attachments] of Object.entries(resolvedTemplateAttachments)) {
+        if ((flow.modeloAnexosSelecionados?.[qualificationTypeId] || []).length === 0) {
+          setTemplateAttachments(qualificationTypeId, attachments)
+        }
+      }
+
       setPersistenceResult(persisted)
       setResult(persisted)
     } catch (persistError) {
@@ -289,8 +356,12 @@ export default function QualificacaoPage() {
           ) : null}
 
           <div className="form-actions">
-            <button className="btn btn--primary" onClick={handleCreateDocumentacoes} disabled={loading}>
-              {loading ? 'Salvando...' : 'Criar documentações'}
+            <button
+              className="btn btn--primary"
+              onClick={handleCreateDocumentacoes}
+              disabled={loading || loadingModelAttachments}
+            >
+              {loading || loadingModelAttachments ? 'Salvando...' : 'Criar documentações'}
             </button>
             <button className="btn btn--ghost" onClick={() => router.push(`/dashboard/servico/${params.id}/documentacao/qualificacao/dados-gerais`)}>
               Voltar para edição

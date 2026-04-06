@@ -3,14 +3,21 @@
 import { useEffect, useEffectEvent, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
-import { EmptyState, PageHeader, PageShell, SurfaceCard } from '../../components/ui'
+import { EmptyState, Field, PageHeader, PageShell, SurfaceCard } from '../../components/ui'
 import NotificationToast from '../../components/NotificationToast'
+import { ConfirmDialog } from '../../components/AppDialog'
 
 export default function Dashboard() {
   const router = useRouter()
   const [servicos, setServicos] = useState([])
+  const [searchTerm, setSearchTerm] = useState('')
+  const [showAdvancedSearch, setShowAdvancedSearch] = useState(false)
+  const [sectorFilter, setSectorFilter] = useState('todos')
+  const [systemFilter, setSystemFilter] = useState('todos')
+  const [sortMode, setSortMode] = useState('recentes')
   const [deletingId, setDeletingId] = useState(null)
   const [toast, setToast] = useState({ visible: false, message: '', tone: 'success' })
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null)
 
   async function buscarServicos() {
     const { data, error } = await supabase
@@ -72,10 +79,13 @@ export default function Dashboard() {
 
   async function excluirServico(event, id) {
     event.stopPropagation()
+    setConfirmDeleteId(id)
+  }
 
-    const confirmou = window.confirm('Tem certeza que deseja excluir este serviço?')
+  async function confirmarExclusaoServico() {
+    const id = confirmDeleteId
 
-    if (!confirmou) {
+    if (!id) {
       return
     }
 
@@ -95,6 +105,7 @@ export default function Dashboard() {
         tone: 'error',
       })
       setDeletingId(null)
+      setConfirmDeleteId(null)
       return
     }
 
@@ -104,6 +115,7 @@ export default function Dashboard() {
       tone: 'success',
     })
     setDeletingId(null)
+    setConfirmDeleteId(null)
     const { data, error: reloadError } = await buscarServicos()
 
     if (!reloadError) {
@@ -116,8 +128,82 @@ export default function Dashboard() {
     router.push(`/dashboard/servico/${id}/editar`)
   }
 
+  const normalizedSearchTerm = searchTerm.trim().toLowerCase()
+
+  const sectorOptions = Array.from(
+    new Set(servicos.map((item) => item.sector).filter(Boolean)),
+  ).sort((left, right) => left.localeCompare(right, 'pt-BR'))
+
+  const systemOptions = Array.from(
+    new Set(servicos.map((item) => item.system).filter(Boolean)),
+  ).sort((left, right) => left.localeCompare(right, 'pt-BR'))
+
+  const filteredServicos = servicos
+    .filter((item) => {
+      if (sectorFilter !== 'todos' && item.sector !== sectorFilter) {
+        return false
+      }
+
+      if (systemFilter !== 'todos' && item.system !== systemFilter) {
+        return false
+      }
+
+      if (!normalizedSearchTerm) {
+        return true
+      }
+
+      const searchableValues = [
+        item.os,
+        item.client,
+        item.sector,
+        item.system,
+        item.delivery_date,
+      ]
+
+      return searchableValues
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(normalizedSearchTerm))
+    })
+    .sort((left, right) => {
+      if (sortMode === 'os-asc') {
+        return String(left.os || left.id).localeCompare(String(right.os || right.id), 'pt-BR', {
+          numeric: true,
+        })
+      }
+
+      if (sortMode === 'os-desc') {
+        return String(right.os || right.id).localeCompare(String(left.os || left.id), 'pt-BR', {
+          numeric: true,
+        })
+      }
+
+      if (sortMode === 'cliente-asc') {
+        return String(left.client || '').localeCompare(String(right.client || ''), 'pt-BR')
+      }
+
+      if (sortMode === 'entrega-asc') {
+        return String(left.delivery_date || '').localeCompare(String(right.delivery_date || ''), 'pt-BR')
+      }
+
+      if (sortMode === 'entrega-desc') {
+        return String(right.delivery_date || '').localeCompare(String(left.delivery_date || ''), 'pt-BR')
+      }
+
+      return Number(right.id || 0) - Number(left.id || 0)
+    })
+
   return (
     <PageShell>
+      <ConfirmDialog
+        open={Boolean(confirmDeleteId)}
+        title="Excluir serviço"
+        description="Esse serviço será removido do dashboard."
+        confirmLabel="Excluir serviço"
+        busy={Boolean(deletingId)}
+        onClose={() => setConfirmDeleteId(null)}
+        onConfirm={confirmarExclusaoServico}
+      />
+
       <NotificationToast
         visible={toast.visible}
         message={toast.message}
@@ -138,26 +224,10 @@ export default function Dashboard() {
           meta={
             <>
               <span className="badge badge--primary">{servicos.length} registros</span>
-              <span className="badge">Ordem mais recente primeiro</span>
             </>
           }
         />
       </SurfaceCard>
-
-      <div className="stats-grid">
-        <div className="stat-card">
-          <span className="stat-card__label">Serviços cadastrados</span>
-          <span className="stat-card__value">{servicos.length}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-card__label">Fluxo principal</span>
-          <span className="stat-card__value">Dashboard</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-card__label">Integração</span>
-          <span className="stat-card__value">Supabase</span>
-        </div>
-      </div>
 
       <SurfaceCard>
         <div className="surface-card__header">
@@ -167,6 +237,64 @@ export default function Dashboard() {
               Clique em uma linha para abrir os detalhes do serviço correspondente.
             </p>
           </div>
+        </div>
+
+        <div style={{ marginBottom: 20 }}>
+          <div className="dashboard-search-row" style={{ marginBottom: 16 }}>
+            <Field label="Pesquisar">
+              <input
+                className="input"
+                placeholder="Buscar por OS, cliente, setor, sistema ou entrega"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+              />
+            </Field>
+
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => setShowAdvancedSearch((currentValue) => !currentValue)}
+            >
+              {showAdvancedSearch ? 'Ocultar pesquisa avançada' : 'Pesquisa avançada'}
+            </button>
+          </div>
+
+          {showAdvancedSearch ? (
+            <div className="form-grid">
+              <Field label="Setor">
+                <select className="input" value={sectorFilter} onChange={(event) => setSectorFilter(event.target.value)}>
+                  <option value="todos">Todos</option>
+                  {sectorOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field label="Sistema">
+                <select className="input" value={systemFilter} onChange={(event) => setSystemFilter(event.target.value)}>
+                  <option value="todos">Todos</option>
+                  {systemOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field label="Ordenar por">
+                <select className="input" value={sortMode} onChange={(event) => setSortMode(event.target.value)}>
+                  <option value="recentes">Mais recentes</option>
+                  <option value="os-asc">OS crescente</option>
+                  <option value="os-desc">OS decrescente</option>
+                  <option value="cliente-asc">Cliente A-Z</option>
+                  <option value="entrega-asc">Entrega mais antiga</option>
+                  <option value="entrega-desc">Entrega mais recente</option>
+                </select>
+              </Field>
+            </div>
+          ) : null}
         </div>
 
         {servicos.length === 0 ? (
@@ -179,6 +307,11 @@ export default function Dashboard() {
               </button>
             }
           />
+        ) : filteredServicos.length === 0 ? (
+          <EmptyState
+            title="Nenhum resultado encontrado"
+            description="Ajuste os filtros ou a pesquisa para encontrar o serviço desejado."
+          />
         ) : (
           <div className="list-table">
             <div className="list-table__header">
@@ -189,13 +322,13 @@ export default function Dashboard() {
               <span>Ações</span>
             </div>
 
-            {servicos.map((item) => (
+            {filteredServicos.map((item) => (
               <div
                 key={item.id}
                 className="list-table__row list-table__row--interactive"
                 onClick={() => router.push(`/dashboard/servico/${item.id}`)}
               >
-                <span className="badge">#{item.os || item.id}</span>
+                <span className="badge badge--os">{item.os || item.id}</span>
                 <div className="list-table__cell-title">
                   <span className="list-table__title">{item.client || 'Cliente não informado'}</span>
                   <span className="list-table__description">

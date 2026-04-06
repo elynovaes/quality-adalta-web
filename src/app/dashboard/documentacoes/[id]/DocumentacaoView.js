@@ -1,19 +1,85 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  createDocumentacaoSection,
+  addEquipmentToDocumentacao,
+  deleteDocumentacaoAttachment,
+  deleteDocumentacaoSection,
+  fetchCompatibleModelAttachmentsForDocumentacao,
+  fetchCompatibleModelSectionsForAttachment,
+  importModelAttachmentsToDocumentacao,
+  importModelSectionsToAttachment,
   saveDocumentacaoResponses,
 } from '@/features/documentacao/services/documentacaoReadService'
 import { EmptyState, Field, PageHeader, PageShell, SurfaceCard } from '@/components/ui'
+import { AppDialog, ConfirmDialog } from '@/components/AppDialog'
 
-function normalizeCampoTipo(tipo) {
-  return String(tipo || '').trim().toLowerCase()
+const AIRFLOW_BLOCK_LABELS = [
+  'Duto de ar de insuflamento',
+  'Duto de ar de retorno',
+  'Duto de ar externo',
+]
+const AIRFLOW_METHOD_SUFFIX = 'Método de medição'
+const AIRFLOW_SEGMENT_COUNT_SUFFIX = 'Quantidade de trechos'
+const AIRFLOW_SEGMENT_NOMINALS_SUFFIX = 'Vazões nominais dos trechos'
+const AIRFLOW_CONFIGURATION_FIELD = 'Configuração dos dutos'
+const AIRFLOW_ACCEPTANCE_SUFFIX = 'Critério de aceitação por ponto'
+const AIRFLOW_MATRIX_STORAGE_SUFFIX = 'Leituras da matriz'
+const AIRFLOW_SEGMENTS_DATA_SUFFIX = 'Trechos de pitot'
+const AIRFLOW_MEASURED_FLOW_SUFFIX = 'Vazão medida'
+const AIRFLOW_PERCENTAGE_SUFFIX = '% em relação à vazão nominal'
+const AIRFLOW_OUTLET_SUM_SUFFIX = 'Somatório de bocas'
+const AIRFLOW_DEVIATION_COMMENT_SUFFIX = 'Comentário de desvio'
+
+function normalizeCampoTipo(value) {
+  return String(value || '').trim().toLowerCase()
 }
 
-function getCampoKind(tipo) {
-  const normalizedType = normalizeCampoTipo(tipo)
+function getCampoKind(campo) {
+  const normalizedName = normalizeCampoTipo(campo?.nome)
+  const normalizedLabel = normalizeCampoTipo(campo?.label)
+  const normalizedType = normalizeCampoTipo(campo?.tipo)
+
+  if (
+    normalizedName === 'data de inspeção' ||
+    normalizedName === 'data de inspecao' ||
+    normalizedLabel === 'data de inspeção' ||
+    normalizedLabel === 'data de inspecao'
+  ) {
+    return 'date'
+  }
+
+  if (normalizedName === 'procedimento' || normalizedLabel === 'procedimento') {
+    return 'select'
+  }
+
+  if (
+    normalizedName.endsWith('método de medição') ||
+    normalizedName.endsWith('metodo de medicao') ||
+    normalizedLabel === 'método de medição' ||
+    normalizedLabel === 'metodo de medicao'
+  ) {
+    return 'select'
+  }
+
+  if (
+    normalizedName === 'configuração dos dutos' ||
+    normalizedName === 'configuracao dos dutos' ||
+    normalizedLabel === 'configuração dos dutos' ||
+    normalizedLabel === 'configuracao dos dutos'
+  ) {
+    return 'select'
+  }
+
+  if (
+    normalizedName === 'método de medição' ||
+    normalizedName === 'metodo de medicao' ||
+    normalizedLabel === 'método de medição' ||
+    normalizedLabel === 'metodo de medicao'
+  ) {
+    return 'select'
+  }
 
   if (
     normalizedType.includes('textarea') ||
@@ -50,7 +116,36 @@ function getCampoLabel(campo) {
   return campo.label || campo.nome || `Campo ${campo.id}`
 }
 
+function normalizeCampoNome(campo) {
+  return String(campo?.nome || '').trim().toLowerCase()
+}
+
+function isInstrumentField(campo) {
+  const normalizedName = normalizeCampoNome(campo)
+
+  return (
+    normalizedName === 'alicate amperímetro'.toLowerCase() ||
+    normalizedName === 'alicate amperimetro' ||
+    normalizedName === 'balômetro'.toLowerCase() ||
+    normalizedName === 'balometro' ||
+    normalizedName === 'manômetro ta scope'.toLowerCase() ||
+    normalizedName === 'manometro ta scope'
+  )
+}
+
+function isIdentificationSection(secao) {
+  const normalizedName = String(secao?.nome || '').trim().toLowerCase()
+  return normalizedName === 'identificação' || normalizedName === 'identificacao'
+}
+
+function isAirflowSection(secao) {
+  const normalizedName = String(secao?.nome || '').trim().toLowerCase()
+  return normalizedName === 'vazão de ar' || normalizedName === 'vazao de ar'
+}
+
 function parseCampoOptions(campo) {
+  const normalizedName = normalizeCampoNome(campo)
+  const normalizedLabel = normalizeCampoTipo(campo?.label)
   const rawOptions = campo.opcoes || campo.options || ''
 
   if (Array.isArray(rawOptions)) {
@@ -58,6 +153,28 @@ function parseCampoOptions(campo) {
   }
 
   if (typeof rawOptions !== 'string' || rawOptions.trim() === '') {
+    if (normalizedName === 'procedimento') {
+      return ['AD-PT-OQ-SUT']
+    }
+
+    if (normalizedName === 'configuração dos dutos' || normalizedName === 'configuracao dos dutos') {
+      return [
+        '100% ar externo - somente insuflamento',
+        'Insuflamento + retorno',
+        'Insuflamento + ar externo',
+        'Insuflamento + retorno + ar externo',
+      ]
+    }
+
+    if (
+      normalizedName.endsWith('método de medição') ||
+      normalizedName.endsWith('metodo de medicao') ||
+      normalizedLabel === 'método de medição' ||
+      normalizedLabel === 'metodo de medicao'
+    ) {
+      return ['Tubo de Pitot', 'Somatório de bocas']
+    }
+
     return []
   }
 
@@ -67,15 +184,58 @@ function parseCampoOptions(campo) {
     .filter(Boolean)
 }
 
+function isAirflowMatrixStorageField(campo) {
+  return String(campo?.nome || '').endsWith(` - ${AIRFLOW_MATRIX_STORAGE_SUFFIX}`)
+}
+
+function isAirflowDeviationCommentField(campo) {
+  return String(campo?.nome || '').endsWith(` - ${AIRFLOW_DEVIATION_COMMENT_SUFFIX}`)
+}
+
+function isAirflowSegmentsStorageField(campo) {
+  return (
+    String(campo?.nome || '').endsWith(` - ${AIRFLOW_SEGMENTS_DATA_SUFFIX}`) ||
+    String(campo?.nome || '').endsWith(` - ${AIRFLOW_SEGMENT_NOMINALS_SUFFIX}`)
+  )
+}
+
+function isAirflowComputedStorageField(campo) {
+  const nome = String(campo?.nome || '')
+  return (
+    nome.endsWith(` - ${AIRFLOW_ACCEPTANCE_SUFFIX}`) ||
+    nome.endsWith(` - ${AIRFLOW_MEASURED_FLOW_SUFFIX}`) ||
+    nome.endsWith(` - ${AIRFLOW_PERCENTAGE_SUFFIX}`)
+  )
+}
+
+function parseMatrixResponseValue(value) {
+  if (!value || typeof value !== 'string') {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
 function normalizeResponses(dados) {
   const nextState = {}
 
   for (const anexo of dados.anexos || []) {
     for (const secao of anexo.secoes || []) {
       for (const campo of secao.campos || []) {
-        const kind = getCampoKind(campo.tipo)
+        const kind = getCampoKind(campo)
+        const matrixValue = isAirflowMatrixStorageField(campo) || isAirflowSegmentsStorageField(campo)
+          ? parseMatrixResponseValue(campo.resposta)
+          : null
 
         nextState[campo.id] =
+          matrixValue !== null
+            ? matrixValue
+            :
           kind === 'checkbox'
             ? campo.resposta === true || campo.resposta === 'true'
             : campo.resposta ?? ''
@@ -86,11 +246,118 @@ function normalizeResponses(dados) {
   return nextState
 }
 
+function formatDateDisplayValue(value) {
+  const normalizedValue = String(value || '').trim()
+
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(normalizedValue)) {
+    return normalizedValue
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalizedValue)) {
+    const [year, month, day] = normalizedValue.split('-')
+    return `${day}/${month}/${year}`
+  }
+
+  return normalizedValue
+}
+
+function normalizeDateInputValue(value) {
+  const digits = String(value || '')
+    .replace(/\D/g, '')
+    .slice(0, 8)
+
+  if (digits.length <= 2) {
+    return digits
+  }
+
+  if (digits.length <= 4) {
+    return `${digits.slice(0, 2)}/${digits.slice(2)}`
+  }
+
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`
+}
+
+function convertDisplayDateToIso(value) {
+  const normalizedValue = String(value || '').trim()
+
+  if (!/^\d{2}\/\d{2}\/\d{4}$/.test(normalizedValue)) {
+    return ''
+  }
+
+  const [day, month, year] = normalizedValue.split('/')
+  return `${year}-${month}-${day}`
+}
+
+function convertIsoDateToDisplay(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim())) {
+    return ''
+  }
+
+  const [year, month, day] = value.split('-')
+  return `${day}/${month}/${year}`
+}
+
+function DateInputField({ fieldId, value, onChange }) {
+  const hiddenDateInputRef = useRef(null)
+
+  return (
+    <div className="date-input">
+      <input
+        id={fieldId}
+        className="input"
+        type="text"
+        inputMode="numeric"
+        placeholder="dd/mm/yyyy"
+        value={formatDateDisplayValue(value)}
+        onChange={(event) => onChange(normalizeDateInputValue(event.target.value))}
+      />
+      <button
+        type="button"
+        className="date-input__button"
+        aria-label="Abrir calendário"
+        onClick={() => {
+          const input = hiddenDateInputRef.current
+
+          if (!input) {
+            return
+          }
+
+          if (typeof input.showPicker === 'function') {
+            input.showPicker()
+            return
+          }
+
+          input.click()
+        }}
+      >
+        Calendário
+      </button>
+      <input
+        ref={hiddenDateInputRef}
+        className="date-input__native"
+        type="date"
+        tabIndex={-1}
+        aria-hidden="true"
+        value={convertDisplayDateToIso(value)}
+        onChange={(event) => onChange(convertIsoDateToDisplay(event.target.value))}
+      />
+    </div>
+  )
+}
+
 function serializeResposta(campo, value) {
-  const kind = getCampoKind(campo.tipo)
+  const kind = getCampoKind(campo)
+
+  if (isAirflowMatrixStorageField(campo) || isAirflowSegmentsStorageField(campo)) {
+    return value && typeof value === 'object' ? JSON.stringify(value) : ''
+  }
 
   if (kind === 'checkbox') {
     return Boolean(value)
+  }
+
+  if (kind === 'date') {
+    return formatDateDisplayValue(value)
   }
 
   if (kind === 'number') {
@@ -100,12 +367,323 @@ function serializeResposta(campo, value) {
   return value ?? ''
 }
 
+function getBaseAttachmentName(nome) {
+  return String(nome || '').replace(/\s-\sEquipamento\s\d+$/i, '').trim()
+}
+
+function getAttachmentEquipmentLabel(nome) {
+  const match = String(nome || '').match(/\s-\sEquipamento\s(\d+)$/i)
+
+  if (match) {
+    return `Equipamento ${match[1]}`
+  }
+
+  return 'Equipamento 1'
+}
+
+function groupAirflowFields(fields) {
+  return AIRFLOW_BLOCK_LABELS.map((blockLabel) => ({
+    blockLabel,
+    fields: (fields || []).filter(
+      (field) =>
+        String(field.nome || '').startsWith(`${blockLabel} - `) &&
+        !isAirflowComputedStorageField(field) &&
+        !isAirflowMatrixStorageField(field) &&
+        !isAirflowSegmentsStorageField(field) &&
+        !isAirflowDeviationCommentField(field)
+    ),
+  }))
+}
+
+function getVisibleAirflowBlocks(configuration) {
+  switch (String(configuration || '').trim()) {
+    case '100% ar externo - somente insuflamento':
+      return ['Duto de ar de insuflamento']
+    case 'Insuflamento + retorno':
+      return ['Duto de ar de insuflamento', 'Duto de ar de retorno']
+    case 'Insuflamento + ar externo':
+      return ['Duto de ar de insuflamento', 'Duto de ar externo']
+    case 'Insuflamento + retorno + ar externo':
+      return AIRFLOW_BLOCK_LABELS
+    default:
+      return AIRFLOW_BLOCK_LABELS
+  }
+}
+
+function isAcceptanceControlledBlock(blockLabel) {
+  return blockLabel === 'Duto de ar de insuflamento'
+}
+
+function supportsOutletSumMethod(blockLabel) {
+  return blockLabel === 'Duto de ar de insuflamento' || blockLabel === 'Duto de ar de retorno'
+}
+
+function getAirflowFieldBySuffix(fields, suffix) {
+  return (fields || []).find((field) => String(field.nome || '').endsWith(` - ${suffix}`))
+}
+
+function parseDecimalValue(value) {
+  const normalized = String(value || '').trim().replace(',', '.')
+  const parsed = Number(normalized)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function calculateAirflowArea(width, height) {
+  const largura = parseDecimalValue(width)
+  const altura = parseDecimalValue(height)
+
+  if (largura <= 0 || altura <= 0) {
+    return ''
+  }
+
+  return String((largura * altura).toFixed(4)).replace('.', ',')
+}
+
+function calculateAcceptanceRange(nominalFlow, width, height) {
+  return calculateAcceptanceRangeForArea(nominalFlow, calculateAirflowArea(width, height))
+}
+
+function calculateAcceptanceRangeForArea(nominalFlow, areaValue) {
+  const vazaoNominal = parseDecimalValue(nominalFlow)
+  const area = parseDecimalValue(areaValue)
+
+  if (vazaoNominal <= 0 || area <= 0) {
+    return ''
+  }
+
+  const nominalVelocity = vazaoNominal / 3600 / area
+  const minimum = nominalVelocity * 0.9
+  const maximum = nominalVelocity * 1.1
+
+  return `${minimum.toFixed(1).replace('.', ',')} a ${maximum
+    .toFixed(1)
+    .replace('.', ',')} m/s`
+}
+
+function calculateMatrixPoints(width, height) {
+  const dimensions = calculateMatrixDimensions(width, height)
+
+  if (!dimensions) {
+    return ''
+  }
+
+  return String(dimensions.columns * dimensions.rows)
+}
+
+function calculateMatrixDimensions(width, height) {
+  const largura = parseDecimalValue(width)
+  const altura = parseDecimalValue(height)
+
+  if (largura <= 0 || altura <= 0) {
+    return null
+  }
+
+  const pointsInWidth = Math.max(1, Math.floor(largura / 0.1))
+  const pointsInHeight = Math.max(1, Math.floor(altura / 0.1))
+
+  return {
+    columns: pointsInWidth,
+    rows: pointsInHeight,
+  }
+}
+
+function normalizeMatrixState(value, rows, columns) {
+  const previousValues =
+    value && typeof value === 'object' && Array.isArray(value.values) ? value.values : []
+
+  return {
+    rows,
+    columns,
+    values: Array.from({ length: rows }, (_, rowIndex) =>
+      Array.from({ length: columns }, (_, columnIndex) => {
+        const previousRow = previousValues[rowIndex]
+        return Array.isArray(previousRow) ? previousRow[columnIndex] ?? '' : ''
+      })
+    ),
+  }
+}
+
+function calculateMeasuredFlow(matrixState, width, height) {
+  const area = parseDecimalValue(calculateAirflowArea(width, height))
+
+  if (!matrixState || !Array.isArray(matrixState.values) || area <= 0) {
+    return ''
+  }
+
+  const flattenedValues = matrixState.values.flat().map((value) => String(value || '').trim())
+
+  if (flattenedValues.length === 0 || flattenedValues.some((value) => value === '')) {
+    return ''
+  }
+
+  const numericValues = flattenedValues.map(parseDecimalValue)
+
+  if (numericValues.some((value) => value <= 0)) {
+    return ''
+  }
+
+  const averageVelocity =
+    numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length
+
+  return String((averageVelocity * area * 3600).toFixed(1)).replace('.', ',')
+}
+
+function calculateMeasuredFlowPercentage(measuredFlow, nominalFlow) {
+  const deviation = calculateMeasuredFlowDeviationValue(measuredFlow, nominalFlow)
+
+  if (deviation === null) {
+    return ''
+  }
+
+  return `${deviation.toFixed(1).replace('.', ',')}%`
+}
+
+function calculateMeasuredFlowDeviationValue(measuredFlow, nominalFlow) {
+  const measured = parseDecimalValue(measuredFlow)
+  const nominal = parseDecimalValue(nominalFlow)
+
+  if (nominal <= 0) {
+    return null
+  }
+
+  return ((measured - nominal) / nominal) * 100
+}
+
+function createEmptyAirflowSegment() {
+  return {
+    width: '',
+    height: '',
+    matrix: {
+      rows: 0,
+      columns: 0,
+      values: [],
+    },
+  }
+}
+
+function normalizeAirflowSegmentNominals(value, count, totalNominal = '') {
+  const parsedValues =
+    value && typeof value === 'object' && Array.isArray(value.values) ? value.values : []
+  const safeCount = Math.max(1, Number(count || 1))
+  const defaultSegmentNominal =
+    totalNominal !== ''
+      ? String((parseDecimalValue(totalNominal) / safeCount).toFixed(1)).replace('.', ',')
+      : ''
+
+  return {
+    count: safeCount,
+    values: Array.from({ length: safeCount }, (_, index) => parsedValues[index] ?? defaultSegmentNominal),
+  }
+}
+
+function normalizeAirflowSegmentsState(value, count, fallbackSegment = null) {
+  const parsedSegments =
+    value && typeof value === 'object' && Array.isArray(value.segments) ? value.segments : []
+  const safeCount = Math.max(1, Number(count || 1))
+
+  return {
+    count: safeCount,
+    segments: Array.from({ length: safeCount }, (_, index) => {
+      const parsedSegment = parsedSegments[index]
+
+      if (parsedSegment && typeof parsedSegment === 'object') {
+        return {
+          width: parsedSegment.width ?? '',
+          height: parsedSegment.height ?? '',
+          matrix:
+            parsedSegment.matrix && typeof parsedSegment.matrix === 'object'
+              ? parsedSegment.matrix
+              : createEmptyAirflowSegment().matrix,
+        }
+      }
+
+      if (index === 0 && fallbackSegment) {
+        return fallbackSegment
+      }
+
+      return createEmptyAirflowSegment()
+    }),
+  }
+}
+
+function calculateSegmentArea(segment) {
+  return calculateAirflowArea(segment?.width, segment?.height)
+}
+
+function calculateSegmentPoints(segment) {
+  return calculateMatrixPoints(segment?.width, segment?.height)
+}
+
+function calculateSegmentMeasuredFlow(segment) {
+  return calculateMeasuredFlow(segment?.matrix, segment?.width, segment?.height)
+}
+
+function calculateTotalAirflowArea(segmentsState) {
+  if (!segmentsState?.segments?.length) {
+    return ''
+  }
+
+  const total = segmentsState.segments.reduce(
+    (sum, segment) => sum + parseDecimalValue(calculateSegmentArea(segment)),
+    0
+  )
+
+  return total > 0 ? String(total.toFixed(4)).replace('.', ',') : ''
+}
+
+function calculateTotalAirflowPoints(segmentsState) {
+  if (!segmentsState?.segments?.length) {
+    return ''
+  }
+
+  const total = segmentsState.segments.reduce(
+    (sum, segment) => sum + Number(calculateSegmentPoints(segment) || 0),
+    0
+  )
+
+  return total > 0 ? String(total) : ''
+}
+
+function calculateTotalMeasuredFlowFromSegments(segmentsState) {
+  if (!segmentsState?.segments?.length) {
+    return ''
+  }
+
+  const measuredFlows = segmentsState.segments.map(calculateSegmentMeasuredFlow)
+
+  if (measuredFlows.some((value) => String(value || '').trim() === '')) {
+    return ''
+  }
+
+  const total = measuredFlows.reduce((sum, value) => sum + parseDecimalValue(value), 0)
+  return total > 0 ? String(total.toFixed(1)).replace('.', ',') : ''
+}
+
 export default function DocumentacaoView({ dados, onRefresh }) {
   const router = useRouter()
-  const [loadingAnexoId, setLoadingAnexoId] = useState(null)
   const [savingSectionId, setSavingSectionId] = useState(null)
   const [feedback, setFeedback] = useState({ error: '', success: '' })
   const [responses, setResponses] = useState(() => normalizeResponses(dados))
+  const [sectionImportDialog, setSectionImportDialog] = useState({ open: false, anexo: null })
+  const [sectionImportOptions, setSectionImportOptions] = useState([])
+  const [selectedSectionImportNames, setSelectedSectionImportNames] = useState([])
+  const [loadingSectionImportOptions, setLoadingSectionImportOptions] = useState(false)
+  const [importingSections, setImportingSections] = useState(false)
+  const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const [importingModelAttachments, setImportingModelAttachments] = useState(false)
+  const [loadingImportOptions, setLoadingImportOptions] = useState(false)
+  const [importOptions, setImportOptions] = useState([])
+  const [selectedImportNames, setSelectedImportNames] = useState([])
+  const [selectedImportSections, setSelectedImportSections] = useState({})
+  const [collapsedAnexoIds, setCollapsedAnexoIds] = useState([])
+  const [collapsedGroupNames, setCollapsedGroupNames] = useState([])
+  const [collapsedSectionIds, setCollapsedSectionIds] = useState([])
+  const [collapsedAirflowBlockKeys, setCollapsedAirflowBlockKeys] = useState([])
+  const [deleteAnexoDialog, setDeleteAnexoDialog] = useState({ open: false, anexo: null })
+  const [deletingAnexoId, setDeletingAnexoId] = useState(null)
+  const [deleteSectionDialog, setDeleteSectionDialog] = useState({ open: false, secao: null })
+  const [deletingSectionId, setDeletingSectionId] = useState(null)
+  const [addingEquipment, setAddingEquipment] = useState(false)
 
   useEffect(() => {
     setResponses(normalizeResponses(dados))
@@ -124,38 +702,241 @@ export default function DocumentacaoView({ dados, onRefresh }) {
       ),
     [dados]
   )
+  const isOQDocument = String(dados.documentacao.tipo || '').toUpperCase().includes('OQ')
+  const attachmentGroups = useMemo(() => {
+    const grouped = new Map()
+
+    for (const anexo of dados.anexos || []) {
+      const baseName = getBaseAttachmentName(anexo.nome)
+
+      if (!grouped.has(baseName)) {
+        grouped.set(baseName, [])
+      }
+
+      grouped.get(baseName).push(anexo)
+    }
+
+    return Array.from(grouped.entries()).map(([baseName, attachments]) => ({
+      baseName,
+      attachments,
+    }))
+  }, [dados.anexos])
 
   async function reloadDocumentacao() {
     setFeedback({ error: '', success: '' })
     await onRefresh()
   }
 
-  async function criarSecao(anexo) {
-    const nome = window.prompt('Nome da nova seção')
+  async function abrirDialogImportacao() {
+    try {
+      setLoadingImportOptions(true)
+      setFeedback({ error: '', success: '' })
+      const attachments = await fetchCompatibleModelAttachmentsForDocumentacao({
+        documentacaoId: dados.documentacao.id,
+      })
+      setImportOptions(attachments)
+      setSelectedImportNames(
+        attachments.filter((attachment) => !attachment.alreadyImported).map((attachment) => attachment.nome)
+      )
+      setSelectedImportSections(
+        attachments.reduce((acc, attachment) => {
+          acc[attachment.nome] = (attachment.sections || []).map((section) => section.nome)
+          return acc
+        }, {})
+      )
+      setImportDialogOpen(true)
+    } catch (error) {
+      setFeedback({
+        error: error.message || 'Nao foi possivel carregar os anexos compatíveis do modelo.',
+        success: '',
+      })
+    } finally {
+      setLoadingImportOptions(false)
+    }
+  }
 
-    if (!nome || !nome.trim()) {
+  async function importarAnexosDoModelo() {
+    try {
+      setImportingModelAttachments(true)
+      setFeedback({ error: '', success: '' })
+
+      const result = await importModelAttachmentsToDocumentacao({
+        documentacaoId: dados.documentacao.id,
+        attachmentNames: selectedImportNames,
+        selectedSectionsByAttachmentName: selectedImportSections,
+      })
+
+      await reloadDocumentacao()
+      setFeedback({
+        error: '',
+        success:
+          result.imported > 0
+            ? `${result.imported} anexo(s) do modelo importado(s) com sucesso.`
+            : 'Todos os anexos do modelo já estavam presentes nesta documentação.',
+      })
+      setImportDialogOpen(false)
+    } catch (error) {
+      setFeedback({
+        error: error.message || 'Nao foi possivel importar os anexos do modelo.',
+        success: '',
+      })
+    } finally {
+      setImportingModelAttachments(false)
+    }
+  }
+
+  async function excluirAnexo() {
+    const anexo = deleteAnexoDialog.anexo
+
+    if (!anexo) {
       return
     }
 
     try {
-      setLoadingAnexoId(anexo.id)
+      setDeletingAnexoId(anexo.id)
       setFeedback({ error: '', success: '' })
-
-      await createDocumentacaoSection({
-        anexoId: anexo.id,
-        nome: nome.trim(),
-        ordem: (anexo.secoes?.length || 0) + 1,
-      })
-
+      await deleteDocumentacaoAttachment(anexo.id)
       await reloadDocumentacao()
-      setFeedback({ error: '', success: 'Seção criada com sucesso.' })
+      setFeedback({ error: '', success: 'Anexo excluído com sucesso.' })
+      setDeleteAnexoDialog({ open: false, anexo: null })
     } catch (error) {
       setFeedback({
-        error: error.message || 'Nao foi possivel criar a seção.',
+        error: error.message || 'Nao foi possivel excluir o anexo.',
         success: '',
       })
     } finally {
-      setLoadingAnexoId(null)
+      setDeletingAnexoId(null)
+    }
+  }
+
+  async function excluirSecao() {
+    const secao = deleteSectionDialog.secao
+
+    if (!secao) {
+      return
+    }
+
+    try {
+      setDeletingSectionId(secao.id)
+      setFeedback({ error: '', success: '' })
+      await deleteDocumentacaoSection(secao.id)
+      await reloadDocumentacao()
+      setFeedback({ error: '', success: 'Seção excluída com sucesso.' })
+      setDeleteSectionDialog({ open: false, secao: null })
+    } catch (error) {
+      setFeedback({
+        error: error.message || 'Nao foi possivel excluir a seção.',
+        success: '',
+      })
+    } finally {
+      setDeletingSectionId(null)
+    }
+  }
+
+  async function adicionarEquipamento() {
+    try {
+      setAddingEquipment(true)
+      setFeedback({ error: '', success: '' })
+      const result = await addEquipmentToDocumentacao(dados.documentacao.id)
+      await reloadDocumentacao()
+      setFeedback({
+        error: '',
+        success: `Equipamento ${result.equipmentNumber} adicionado com sucesso.`,
+      })
+    } catch (error) {
+      setFeedback({
+        error: error.message || 'Nao foi possivel adicionar o equipamento.',
+        success: '',
+      })
+    } finally {
+      setAddingEquipment(false)
+    }
+  }
+
+  function toggleAnexoCollapsed(anexoId) {
+    setCollapsedAnexoIds((current) =>
+      current.includes(anexoId)
+        ? current.filter((id) => id !== anexoId)
+        : [...current, anexoId]
+    )
+  }
+
+  function toggleGroupCollapsed(groupName) {
+    setCollapsedGroupNames((current) =>
+      current.includes(groupName)
+        ? current.filter((name) => name !== groupName)
+        : [...current, groupName]
+    )
+  }
+
+  function toggleSectionCollapsed(secaoId) {
+    setCollapsedSectionIds((current) =>
+      current.includes(secaoId)
+        ? current.filter((id) => id !== secaoId)
+        : [...current, secaoId]
+    )
+  }
+
+  function toggleAirflowBlockCollapsed(blockKey) {
+    setCollapsedAirflowBlockKeys((current) =>
+      current.includes(blockKey)
+        ? current.filter((key) => key !== blockKey)
+        : [...current, blockKey]
+    )
+  }
+
+  async function abrirDialogImportacaoSecao(anexo) {
+    try {
+      setLoadingSectionImportOptions(true)
+      setFeedback({ error: '', success: '' })
+      const sections = await fetchCompatibleModelSectionsForAttachment({
+        anexoId: anexo.id,
+      })
+      setSectionImportOptions(sections)
+      setSelectedSectionImportNames(
+        sections.filter((section) => !section.alreadyImported).map((section) => section.nome)
+      )
+      setSectionImportDialog({ open: true, anexo })
+    } catch (error) {
+      setFeedback({
+        error: error.message || 'Nao foi possivel carregar as seções compatíveis do modelo.',
+        success: '',
+      })
+    } finally {
+      setLoadingSectionImportOptions(false)
+    }
+  }
+
+  async function importarSecoesDoModelo() {
+    const anexo = sectionImportDialog.anexo
+
+    if (!anexo) {
+      return
+    }
+
+    try {
+      setImportingSections(true)
+      setFeedback({ error: '', success: '' })
+      const result = await importModelSectionsToAttachment({
+        anexoId: anexo.id,
+        sectionNames: selectedSectionImportNames,
+      })
+      await reloadDocumentacao()
+      setFeedback({
+        error: '',
+        success:
+          result.imported > 0
+            ? `${result.imported} seção(ões) do modelo importada(s) com sucesso.`
+            : 'Todas as seções compatíveis do modelo já estavam presentes neste anexo.',
+      })
+      setSectionImportDialog({ open: false, anexo: null })
+    } catch (error) {
+      setFeedback({
+        error: error.message || 'Nao foi possivel importar as seções do modelo.',
+        success: '',
+      })
+    } finally {
+      setImportingSections(false)
     }
   }
 
@@ -167,8 +948,10 @@ export default function DocumentacaoView({ dados, onRefresh }) {
       await saveDocumentacaoResponses({
         documentacaoId: dados.documentacao.id,
         respostas: (secao.campos || []).map((campo) => ({
+          anexoId: secao.anexo_id,
+          secaoId: secao.id,
           campoId: campo.id,
-          value: serializeResposta(campo, responses[campo.id]),
+          value: serializeResposta(campo, getEffectiveFieldValue(campo, secao)),
         })),
       })
 
@@ -185,7 +968,7 @@ export default function DocumentacaoView({ dados, onRefresh }) {
   }
 
   function renderFieldInput(campo) {
-    const kind = getCampoKind(campo.tipo)
+    const kind = getCampoKind(campo)
     const options = parseCampoOptions(campo)
     const fieldId = `campo-${campo.id}`
     const value = responses[campo.id]
@@ -249,23 +1032,906 @@ export default function DocumentacaoView({ dados, onRefresh }) {
     }
 
     return (
-      <input
-        id={fieldId}
-        className="input"
-        type={kind}
-        value={String(value ?? '')}
-        onChange={(event) =>
-          setResponses((current) => ({
-            ...current,
-            [campo.id]: event.target.value,
-          }))
-        }
-      />
+      kind === 'date' ? (
+        <DateInputField
+          fieldId={fieldId}
+          value={value}
+          onChange={(nextValue) =>
+            setResponses((current) => ({
+              ...current,
+              [campo.id]: nextValue,
+            }))
+          }
+        />
+      ) : (
+        <input
+          id={fieldId}
+          className="input"
+          type={kind}
+          value={String(value ?? '')}
+          onChange={(event) =>
+            setResponses((current) => ({
+              ...current,
+              [campo.id]: event.target.value,
+            }))
+          }
+        />
+      )
+    )
+  }
+
+  function getEffectiveFieldValue(campo, secao) {
+    if (!isAirflowSection(secao)) {
+      return responses[campo.id]
+    }
+
+    const [blockLabel = '', suffix = ''] = String(campo.nome || '').split(' - ')
+    const blockFields = (secao.campos || []).filter((field) =>
+      String(field.nome || '').startsWith(`${blockLabel} - `)
+    )
+    const methodField = (secao.campos || []).find(
+      (field) => String(field.nome || '') === `${blockLabel} - ${AIRFLOW_METHOD_SUFFIX}`
+    )
+    const segmentCountField = (secao.campos || []).find(
+      (field) => String(field.nome || '') === `${blockLabel} - ${AIRFLOW_SEGMENT_COUNT_SUFFIX}`
+    )
+    const segmentsDataField = (secao.campos || []).find(
+      (field) => String(field.nome || '') === `${blockLabel} - ${AIRFLOW_SEGMENTS_DATA_SUFFIX}`
+    )
+    const segmentNominalsField = (secao.campos || []).find(
+      (field) => String(field.nome || '') === `${blockLabel} - ${AIRFLOW_SEGMENT_NOMINALS_SUFFIX}`
+    )
+    const outletSumField = getAirflowFieldBySuffix(blockFields, AIRFLOW_OUTLET_SUM_SUFFIX)
+    const widthField = getAirflowFieldBySuffix(blockFields, 'Largura')
+    const heightField = getAirflowFieldBySuffix(blockFields, 'Altura')
+    const nominalField = getAirflowFieldBySuffix(blockFields, 'Vazão nominal')
+    const matrixStorageField = (secao.campos || []).find(
+      (field) => String(field.nome || '') === `${blockLabel} - ${AIRFLOW_MATRIX_STORAGE_SUFFIX}`
+    )
+    const methodValue = methodField ? responses[methodField.id] || 'Tubo de Pitot' : 'Tubo de Pitot'
+    const usingOutletSum = methodValue === 'Somatório de bocas'
+    const widthValue = widthField ? responses[widthField.id] : ''
+    const heightValue = heightField ? responses[heightField.id] : ''
+    const nominalValue = nominalField ? responses[nominalField.id] : ''
+    const outletSumValue = outletSumField ? responses[outletSumField.id] : ''
+    const segmentCount = Math.max(1, Number(segmentCountField ? responses[segmentCountField.id] || 1 : 1))
+    const fallbackFirstSegment = {
+      width: widthValue,
+      height: heightValue,
+      matrix:
+        matrixStorageField && responses[matrixStorageField.id] && typeof responses[matrixStorageField.id] === 'object'
+          ? responses[matrixStorageField.id]
+          : createEmptyAirflowSegment().matrix,
+    }
+    const segmentsState = normalizeAirflowSegmentsState(
+      segmentsDataField ? responses[segmentsDataField.id] : null,
+      segmentCount,
+      fallbackFirstSegment
+    )
+    const segmentNominalsState = normalizeAirflowSegmentNominals(
+      segmentNominalsField ? responses[segmentNominalsField.id] : null,
+      segmentCount,
+      nominalValue
+    )
+
+    if (suffix === 'Área') {
+      if (usingOutletSum) {
+        return ''
+      }
+      return calculateTotalAirflowArea(segmentsState)
+    }
+
+    if (suffix === 'Pontos de matriz') {
+      if (usingOutletSum) {
+        return ''
+      }
+      return calculateTotalAirflowPoints(segmentsState)
+    }
+
+    if (suffix === AIRFLOW_ACCEPTANCE_SUFFIX) {
+      if (usingOutletSum) {
+        return ''
+      }
+      return calculateAcceptanceRangeForArea(nominalValue, calculateTotalAirflowArea(segmentsState))
+    }
+
+    if (suffix === AIRFLOW_MATRIX_STORAGE_SUFFIX) {
+      return segmentsState.segments[0]?.matrix || createEmptyAirflowSegment().matrix
+    }
+
+    if (suffix === AIRFLOW_SEGMENTS_DATA_SUFFIX) {
+      return segmentsState
+    }
+
+    if (suffix === AIRFLOW_SEGMENT_NOMINALS_SUFFIX) {
+      return segmentNominalsState
+    }
+
+    if (suffix === AIRFLOW_SEGMENT_COUNT_SUFFIX) {
+      return String(segmentCount)
+    }
+
+    if (suffix === AIRFLOW_MEASURED_FLOW_SUFFIX) {
+      if (usingOutletSum) {
+        return outletSumValue
+      }
+      return calculateTotalMeasuredFlowFromSegments(segmentsState)
+    }
+
+    if (suffix === AIRFLOW_PERCENTAGE_SUFFIX) {
+      const measuredField = (secao.campos || []).find(
+        (field) => String(field.nome || '') === `${blockLabel} - ${AIRFLOW_MEASURED_FLOW_SUFFIX}`
+      )
+      const measuredValue = measuredField ? getEffectiveFieldValue(measuredField, secao) : ''
+      return calculateMeasuredFlowPercentage(measuredValue, nominalValue)
+    }
+
+    if (suffix === AIRFLOW_OUTLET_SUM_SUFFIX && !usingOutletSum) {
+      return responses[campo.id]
+    }
+
+    if (suffix === AIRFLOW_OUTLET_SUM_SUFFIX) {
+      return outletSumValue
+    }
+
+    return responses[campo.id]
+  }
+
+  function renderAirflowSection(secao) {
+    const configurationField = (secao.campos || []).find(
+      (campo) => String(campo.nome || '') === AIRFLOW_CONFIGURATION_FIELD
+    )
+    const selectedConfiguration = configurationField ? responses[configurationField.id] : ''
+    const visibleBlocks = getVisibleAirflowBlocks(selectedConfiguration)
+
+    return (
+      <div className="stack">
+        {configurationField ? (
+          <SurfaceCard>
+            <div className="form-grid form-grid--single">
+              <Field
+                label="Situação do equipamento"
+                hint="Escolha quais dutos devem ser preenchidos neste equipamento."
+              >
+                {renderFieldInput(configurationField)}
+              </Field>
+            </div>
+          </SurfaceCard>
+        ) : null}
+
+        {groupAirflowFields(secao.campos)
+          .filter((block) => visibleBlocks.includes(block.blockLabel))
+          .map((block) => {
+          const blockKey = `${secao.id}:${block.blockLabel}`
+          const isBlockCollapsed = collapsedAirflowBlockKeys.includes(blockKey)
+          const nominalField = getAirflowFieldBySuffix(block.fields, 'Vazão nominal')
+          const methodField = (secao.campos || []).find(
+            (field) => String(field.nome || '') === `${block.blockLabel} - ${AIRFLOW_METHOD_SUFFIX}`
+          )
+          const segmentCountField = (secao.campos || []).find(
+            (field) => String(field.nome || '') === `${block.blockLabel} - ${AIRFLOW_SEGMENT_COUNT_SUFFIX}`
+          )
+          const segmentsDataField = (secao.campos || []).find(
+            (field) => String(field.nome || '') === `${block.blockLabel} - ${AIRFLOW_SEGMENTS_DATA_SUFFIX}`
+          )
+          const segmentNominalsField = (secao.campos || []).find(
+            (field) => String(field.nome || '') === `${block.blockLabel} - ${AIRFLOW_SEGMENT_NOMINALS_SUFFIX}`
+          )
+          const widthField = getAirflowFieldBySuffix(block.fields, 'Largura')
+          const heightField = getAirflowFieldBySuffix(block.fields, 'Altura')
+          const areaField = getAirflowFieldBySuffix(block.fields, 'Área')
+          const matrixField = getAirflowFieldBySuffix(block.fields, 'Pontos de matriz')
+          const outletSumField = getAirflowFieldBySuffix(block.fields, AIRFLOW_OUTLET_SUM_SUFFIX)
+          const matrixStorageField = (secao.campos || []).find(
+            (field) => String(field.nome || '') === `${block.blockLabel} - ${AIRFLOW_MATRIX_STORAGE_SUFFIX}`
+          )
+          const deviationCommentField = (secao.campos || []).find(
+            (field) => String(field.nome || '') === `${block.blockLabel} - ${AIRFLOW_DEVIATION_COMMENT_SUFFIX}`
+          )
+          const selectedMethod = methodField ? responses[methodField.id] || 'Tubo de Pitot' : 'Tubo de Pitot'
+          const usingOutletSum = selectedMethod === 'Somatório de bocas'
+          const segmentCount = Math.max(1, Number(segmentCountField ? responses[segmentCountField.id] || 1 : 1))
+          const pitotSegmentsState = segmentsDataField
+            ? getEffectiveFieldValue(segmentsDataField, secao)
+            : normalizeAirflowSegmentsState(null, segmentCount)
+          const segmentNominalsState = segmentNominalsField
+            ? getEffectiveFieldValue(segmentNominalsField, secao)
+            : normalizeAirflowSegmentNominals(null, segmentCount, responses[nominalField?.id] ?? '')
+          const measuredFlow =
+            usingOutletSum
+              ? outletSumField
+                ? String(responses[outletSumField.id] ?? '')
+                : ''
+              : calculateTotalMeasuredFlowFromSegments(pitotSegmentsState)
+          const acceptanceField = (secao.campos || []).find(
+            (field) => String(field.nome || '') === `${block.blockLabel} - ${AIRFLOW_ACCEPTANCE_SUFFIX}`
+          )
+          const measuredFlowPercentage =
+            measuredFlow && nominalField
+              ? calculateMeasuredFlowPercentage(measuredFlow, responses[nominalField.id])
+              : ''
+          const measuredFlowDeviation =
+            measuredFlow && nominalField
+              ? calculateMeasuredFlowDeviationValue(measuredFlow, responses[nominalField.id])
+              : null
+          const hasAcceptanceCriteria = isAcceptanceControlledBlock(block.blockLabel)
+          const requiresDeviationComment =
+            hasAcceptanceCriteria && measuredFlowDeviation !== null && Math.abs(measuredFlowDeviation) > 10
+          const isWithinAcceptance =
+            hasAcceptanceCriteria && measuredFlowDeviation !== null && Math.abs(measuredFlowDeviation) <= 10
+
+          return (
+            <SurfaceCard key={block.blockLabel}>
+              <div className="surface-card__header">
+                <div>
+                  <h4 className="surface-card__title">{block.blockLabel}</h4>
+                  <p className="surface-card__subtitle">
+                    {usingOutletSum
+                      ? 'Use o somatório de bocas quando não houver trecho de pitot disponível.'
+                      : 'Área e pontos de matriz são calculados automaticamente pela largura e altura.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => toggleAirflowBlockCollapsed(blockKey)}
+                >
+                  {isBlockCollapsed ? 'Expandir' : 'Recolher'}
+                </button>
+              </div>
+
+              {isBlockCollapsed ? null : (
+              <div className="stack">
+                {methodField && supportsOutletSumMethod(block.blockLabel) ? (
+                  <div className="form-grid form-grid--single">
+                    <Field
+                      label="Método de medição"
+                      hint="Escolha entre Tubo de Pitot e Somatório de bocas."
+                    >
+                      <select
+                        id={`campo-${methodField.id}`}
+                        className="input"
+                        value={String(responses[methodField.id] ?? 'Tubo de Pitot')}
+                        onChange={(event) =>
+                          setResponses((current) => ({
+                            ...current,
+                            [methodField.id]: event.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">Selecione</option>
+                        <option value="Tubo de Pitot">Tubo de Pitot</option>
+                        <option value="Somatório de bocas">Somatório de bocas</option>
+                      </select>
+                    </Field>
+                  </div>
+                ) : null}
+
+                {usingOutletSum ? (
+                  <div className="form-grid form-grid--airflow-summary">
+                    {nominalField ? (
+                      <Field label={nominalField.label || 'Vazão nominal (m³/h)'}>
+                        {renderFieldInput(nominalField)}
+                      </Field>
+                    ) : null}
+                    {outletSumField ? (
+                      <Field label={outletSumField.label || 'Somatório de bocas (m³/h)'}>
+                        <input
+                          id={`campo-${outletSumField.id}`}
+                          className="input"
+                          type="number"
+                          value={String(responses[outletSumField.id] ?? '')}
+                          onChange={(event) =>
+                            setResponses((current) => ({
+                              ...current,
+                              [outletSumField.id]: event.target.value,
+                            }))
+                          }
+                        />
+                      </Field>
+                    ) : null}
+                    <Field
+                      label={hasAcceptanceCriteria ? 'Desvio' : 'Desvio (informativo)'}
+                      hint={
+                        hasAcceptanceCriteria
+                          ? 'Desvio percentual da medição em relação à vazão nominal.'
+                          : 'Desvio percentual apenas informativo para este tipo de duto.'
+                      }
+                    >
+                      <input
+                        className={`input${
+                          hasAcceptanceCriteria && requiresDeviationComment
+                            ? ' input--error'
+                            : hasAcceptanceCriteria && isWithinAcceptance
+                              ? ' input--success'
+                              : ''
+                        }`}
+                        readOnly
+                        value={measuredFlowPercentage}
+                      />
+                    </Field>
+                  </div>
+                ) : (
+                  <>
+                <div className="form-grid form-grid--airflow-summary">
+                  {nominalField ? (
+                    <Field label={nominalField.label || 'Vazão nominal (m³/h)'}>
+                      {renderFieldInput(nominalField)}
+                    </Field>
+                  ) : null}
+                  {segmentCountField ? (
+                    <Field label="Quantidade de trechos de Pitot">
+                      <input
+                        id={`campo-${segmentCountField.id}`}
+                        className="input"
+                        type="number"
+                        min="1"
+                        max="6"
+                        value={String(segmentCount)}
+                        onChange={(event) =>
+                          setResponses((current) => {
+                            const nextCount = Math.max(1, Math.min(6, Number(event.target.value || 1)))
+                            const nextState = {
+                              ...current,
+                              [segmentCountField.id]: String(nextCount),
+                            }
+
+                            if (segmentsDataField) {
+                              const currentSegments = normalizeAirflowSegmentsState(
+                                current[segmentsDataField.id],
+                                nextCount
+                              )
+                              nextState[segmentsDataField.id] = currentSegments
+
+                              if (widthField) {
+                                nextState[widthField.id] = currentSegments.segments[0]?.width ?? ''
+                              }
+
+                              if (heightField) {
+                                nextState[heightField.id] = currentSegments.segments[0]?.height ?? ''
+                              }
+
+                              if (matrixStorageField) {
+                                nextState[matrixStorageField.id] =
+                                  currentSegments.segments[0]?.matrix ?? createEmptyAirflowSegment().matrix
+                              }
+                            }
+
+                            return nextState
+                          })
+                        }
+                      />
+                    </Field>
+                  ) : null}
+                </div>
+
+                {pitotSegmentsState.segments.map((segment, segmentIndex) => {
+                  const dimensions = calculateMatrixDimensions(segment.width, segment.height)
+                  const segmentArea = calculateSegmentArea(segment)
+                  const segmentPoints = calculateSegmentPoints(segment)
+                  const segmentMeasuredFlow = calculateSegmentMeasuredFlow(segment)
+                  const segmentNominal = segmentNominalsState.values[segmentIndex] ?? ''
+                  const segmentAcceptanceRange = calculateAcceptanceRangeForArea(
+                    segmentNominal,
+                    segmentArea
+                  )
+
+                  return (
+                    <SurfaceCard key={`${block.blockLabel}:trecho:${segmentIndex + 1}`}>
+                      <div className="surface-card__header">
+                        <div>
+                          <h5 className="surface-card__title">Trecho {segmentIndex + 1}</h5>
+                          <p className="surface-card__subtitle">
+                            Informe as dimensões e as leituras da matriz deste trecho.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="form-grid form-grid--airflow-summary">
+                        <Field label="Vazão nominal do trecho">
+                          <input
+                            className="input"
+                            type="number"
+                            value={String(segmentNominal ?? '')}
+                            onChange={(event) =>
+                              segmentNominalsField
+                                ? setResponses((current) => {
+                                    const nextNominals = normalizeAirflowSegmentNominals(
+                                      current[segmentNominalsField.id],
+                                      segmentCount,
+                                      current[nominalField?.id] ?? ''
+                                    )
+                                    nextNominals.values[segmentIndex] = event.target.value
+
+                                    return {
+                                      ...current,
+                                      [segmentNominalsField.id]: nextNominals,
+                                    }
+                                  })
+                                : undefined
+                            }
+                          />
+                        </Field>
+                        <Field label="Largura (m)">
+                          <input
+                            className="input"
+                            type="number"
+                            value={String(segment.width ?? '')}
+                            onChange={(event) =>
+                              setResponses((current) => {
+                                const nextSegments = normalizeAirflowSegmentsState(
+                                  current[segmentsDataField.id],
+                                  segmentCount
+                                )
+                                nextSegments.segments[segmentIndex].width = event.target.value
+                                const nextState = {
+                                  ...current,
+                                  [segmentsDataField.id]: nextSegments,
+                                }
+
+                                if (segmentIndex === 0 && widthField) {
+                                  nextState[widthField.id] = event.target.value
+                                }
+
+                                return nextState
+                              })
+                            }
+                          />
+                        </Field>
+                        <Field label="Altura (m)">
+                          <input
+                            className="input"
+                            type="number"
+                            value={String(segment.height ?? '')}
+                            onChange={(event) =>
+                              setResponses((current) => {
+                                const nextSegments = normalizeAirflowSegmentsState(
+                                  current[segmentsDataField.id],
+                                  segmentCount
+                                )
+                                nextSegments.segments[segmentIndex].height = event.target.value
+                                const nextState = {
+                                  ...current,
+                                  [segmentsDataField.id]: nextSegments,
+                                }
+
+                                if (segmentIndex === 0 && heightField) {
+                                  nextState[heightField.id] = event.target.value
+                                }
+
+                                return nextState
+                              })
+                            }
+                          />
+                        </Field>
+                      </div>
+
+                      <div className="form-grid form-grid--airflow-summary">
+                        <Field label="Área (m²)">
+                          <input className="input" readOnly value={segmentArea} />
+                        </Field>
+                        <Field label="Pontos de matriz">
+                          <input className="input" readOnly value={segmentPoints} />
+                        </Field>
+                        <Field label="Vazão medida do trecho">
+                          <input
+                            className="input"
+                            readOnly
+                            value={segmentMeasuredFlow ? `${segmentMeasuredFlow} m³/h` : ''}
+                          />
+                        </Field>
+                      </div>
+
+                      <div className="form-grid form-grid--single">
+                        <Field
+                          label={hasAcceptanceCriteria ? 'Critério de aceitação por ponto do trecho' : 'Faixa informativa por ponto do trecho'}
+                          hint={
+                            hasAcceptanceCriteria
+                              ? 'Baseado na vazão nominal do trecho e na área deste trecho.'
+                              : 'Faixa apenas informativa para este tipo de duto.'
+                          }
+                        >
+                          <input className="input" readOnly value={segmentAcceptanceRange} />
+                        </Field>
+                      </div>
+
+                      {dimensions ? (
+                        <div className="stack">
+                          <div>
+                            <strong>Matriz de medições</strong>
+                            <p className="muted">
+                              Preencha os {dimensions.rows} x {dimensions.columns} pontos deste trecho.
+                            </p>
+                          </div>
+
+                          <div
+                            className="matrix-grid"
+                            style={{ gridTemplateColumns: `repeat(${dimensions.columns}, minmax(88px, 1fr))` }}
+                          >
+                            {normalizeMatrixState(segment.matrix, dimensions.rows, dimensions.columns).values.map(
+                              (row, rowIndex) =>
+                                row.map((cellValue, columnIndex) => (
+                                  <label
+                                    key={`${block.blockLabel}:${segmentIndex}:${rowIndex}:${columnIndex}`}
+                                    className="matrix-grid__cell"
+                                  >
+                                    <input
+                                      className="input"
+                                      type="number"
+                                      value={cellValue}
+                                      onChange={(event) =>
+                                        setResponses((current) => {
+                                          const nextSegments = normalizeAirflowSegmentsState(
+                                            current[segmentsDataField.id],
+                                            segmentCount
+                                          )
+                                          const nextMatrix = normalizeMatrixState(
+                                            nextSegments.segments[segmentIndex].matrix,
+                                            dimensions.rows,
+                                            dimensions.columns
+                                          )
+                                          nextMatrix.values[rowIndex][columnIndex] = event.target.value
+                                          nextSegments.segments[segmentIndex].matrix = nextMatrix
+
+                                          const nextState = {
+                                            ...current,
+                                            [segmentsDataField.id]: nextSegments,
+                                          }
+
+                                          if (segmentIndex === 0 && matrixStorageField) {
+                                            nextState[matrixStorageField.id] = nextMatrix
+                                          }
+
+                                          return nextState
+                                        })
+                                      }
+                                    />
+                                  </label>
+                                ))
+                            )}
+                          </div>
+                        </div>
+                      ) : null}
+                    </SurfaceCard>
+                  )
+                })}
+
+                  </>
+                )}
+
+                <div className="form-grid form-grid--halves">
+                  <Field
+                    label="Vazão medida"
+                    hint={
+                      usingOutletSum
+                        ? 'Obtida pelo somatório de bocas.'
+                        : 'Calculada pela soma das vazões medidas de todos os trechos.'
+                    }
+                  >
+                    <input
+                      className="input"
+                      readOnly
+                      value={measuredFlow ? `${measuredFlow} m³/h` : ''}
+                    />
+                  </Field>
+
+                  <Field
+                    label={
+                      hasAcceptanceCriteria
+                        ? '% em relação à vazão nominal'
+                        : '% em relação à vazão nominal (informativo)'
+                    }
+                    hint={
+                      hasAcceptanceCriteria
+                        ? 'Percentual da vazão medida comparado com a vazão nominal informada.'
+                        : 'Percentual apenas informativo para este tipo de duto.'
+                    }
+                  >
+                    <input
+                      className={`input${
+                        hasAcceptanceCriteria && requiresDeviationComment
+                          ? ' input--error'
+                          : hasAcceptanceCriteria && isWithinAcceptance
+                            ? ' input--success'
+                            : ''
+                      }`}
+                      readOnly
+                      value={measuredFlowPercentage}
+                    />
+                  </Field>
+                </div>
+
+                {requiresDeviationComment && deviationCommentField ? (
+                  <Field
+                    label="Comentários do desvio"
+                    hint="Explique o motivo do desvio fora do critério de ±10%."
+                  >
+                    <textarea
+                      className="textarea"
+                      value={String(responses[deviationCommentField.id] ?? '')}
+                      onChange={(event) =>
+                        setResponses((current) => ({
+                          ...current,
+                          [deviationCommentField.id]: event.target.value,
+                        }))
+                      }
+                    />
+                  </Field>
+                ) : null}
+              </div>
+              )}
+            </SurfaceCard>
+          )
+        })}
+      </div>
+    )
+  }
+
+  function renderSectionFields(secao) {
+    const fields = secao.campos || []
+
+    if (fields.length === 0) {
+      return <p className="muted">Nenhum campo nesta seção.</p>
+    }
+
+    if (isAirflowSection(secao)) {
+      return renderAirflowSection(secao)
+    }
+
+    if (!isIdentificationSection(secao)) {
+      return (
+        <div className="form-grid form-grid--single">
+          {fields.map((campo) => (
+            <Field
+              key={campo.id}
+              label={getCampoLabel(campo)}
+              hint={campo.tipo ? `Tipo: ${campo.tipo}` : undefined}
+            >
+              {renderFieldInput(campo)}
+            </Field>
+          ))}
+        </div>
+      )
+    }
+
+    const instrumentFields = fields.filter(isInstrumentField)
+    const regularFields = fields.filter((campo) => !isInstrumentField(campo))
+
+    return (
+      <div className="stack">
+        {regularFields.length > 0 ? (
+          <div className="form-grid">
+            {regularFields.map((campo) => (
+              <Field
+                key={campo.id}
+                label={getCampoLabel(campo)}
+                hint={campo.tipo ? `Tipo: ${campo.tipo}` : undefined}
+              >
+                {renderFieldInput(campo)}
+              </Field>
+            ))}
+          </div>
+        ) : null}
+
+        {instrumentFields.length > 0 ? (
+          <SurfaceCard>
+            <div className="surface-card__header">
+              <div>
+                <h4 className="surface-card__title">Instrumentos utilizados</h4>
+                <p className="surface-card__subtitle">
+                  Informe o número de série dos instrumentos utilizados nesta inspeção.
+                </p>
+              </div>
+            </div>
+
+            <div className="form-grid form-grid--single">
+              {instrumentFields.map((campo) => (
+                <Field
+                  key={campo.id}
+                  label="Nº de série"
+                  hint={campo.nome}
+                >
+                  {renderFieldInput(campo)}
+                </Field>
+              ))}
+            </div>
+          </SurfaceCard>
+        ) : null}
+      </div>
     )
   }
 
   return (
     <PageShell>
+      <ConfirmDialog
+        open={deleteAnexoDialog.open}
+        title="Excluir anexo"
+        description={
+          deleteAnexoDialog.anexo
+            ? `O anexo "${deleteAnexoDialog.anexo.nome}" e suas seções serão removidos desta documentação.`
+            : ''
+        }
+        confirmLabel="Excluir anexo"
+        busy={Boolean(deletingAnexoId)}
+        onClose={() => setDeleteAnexoDialog({ open: false, anexo: null })}
+        onConfirm={excluirAnexo}
+      />
+
+      <ConfirmDialog
+        open={deleteSectionDialog.open}
+        title="Excluir seção"
+        description={
+          deleteSectionDialog.secao
+            ? `A seção "${deleteSectionDialog.secao.nome}" e seus campos serão removidos deste anexo.`
+            : ''
+        }
+        confirmLabel="Excluir seção"
+        busy={Boolean(deletingSectionId)}
+        onClose={() => setDeleteSectionDialog({ open: false, secao: null })}
+        onConfirm={excluirSecao}
+      />
+
+      <AppDialog
+        open={importDialogOpen}
+        title="Importar anexos do modelo"
+        description="Escolha quais anexos do modelo compatível devem ser criados nesta documentação."
+        onClose={importingModelAttachments ? undefined : () => setImportDialogOpen(false)}
+        actions={
+          <>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => setImportDialogOpen(false)}
+              disabled={importingModelAttachments}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={importarAnexosDoModelo}
+              disabled={importingModelAttachments || selectedImportNames.length === 0}
+            >
+              {importingModelAttachments ? 'Importando...' : 'Importar selecionados'}
+            </button>
+          </>
+        }
+      >
+        {loadingImportOptions ? (
+          <p className="muted">Carregando anexos compatíveis...</p>
+        ) : importOptions.length === 0 ? (
+          <p className="muted">Nenhum anexo compatível foi encontrado no modelo.</p>
+        ) : (
+          <div className="stack">
+            {importOptions.map((attachment) => {
+              const checked = selectedImportNames.includes(attachment.nome)
+              const selectedSections = selectedImportSections[attachment.nome] || []
+
+              return (
+                <div key={attachment.nome} className="stack">
+                  <label className="checkbox-field">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={attachment.alreadyImported || importingModelAttachments}
+                      onChange={(event) => {
+                        setSelectedImportNames((current) =>
+                          event.target.checked
+                            ? [...current, attachment.nome]
+                            : current.filter((name) => name !== attachment.nome)
+                        )
+                      }}
+                    />
+                    <span>
+                      {attachment.nome}
+                      {attachment.alreadyImported ? ' (já importado)' : ''}
+                    </span>
+                  </label>
+
+                  {checked && !attachment.alreadyImported && attachment.sections?.length ? (
+                    <div className="section-panel">
+                      <div>
+                        <strong>Seções do anexo</strong>
+                        <p className="muted">
+                          Escolha quais seções deste anexo devem ser criadas para esta documentação.
+                        </p>
+                      </div>
+                      <div className="stack">
+                        {attachment.sections.map((section) => (
+                          <label key={`${attachment.nome}:${section.nome}`} className="checkbox-field">
+                            <input
+                              type="checkbox"
+                              checked={selectedSections.includes(section.nome)}
+                              disabled={importingModelAttachments}
+                              onChange={(event) => {
+                                setSelectedImportSections((current) => {
+                                  const currentSections = current[attachment.nome] || []
+                                  return {
+                                    ...current,
+                                    [attachment.nome]: event.target.checked
+                                      ? [...currentSections, section.nome]
+                                      : currentSections.filter((name) => name !== section.nome),
+                                  }
+                                })
+                              }}
+                            />
+                            <span>{section.nome}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </AppDialog>
+
+      <AppDialog
+        open={sectionImportDialog.open}
+        title="Adicionar seção do modelo"
+        description={
+          sectionImportDialog.anexo
+            ? `Escolha quais seções do modelo devem ser adicionadas em ${sectionImportDialog.anexo.nome}.`
+            : ''
+        }
+        onClose={importingSections ? undefined : () => setSectionImportDialog({ open: false, anexo: null })}
+        actions={
+          <>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => setSectionImportDialog({ open: false, anexo: null })}
+              disabled={importingSections}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={importarSecoesDoModelo}
+              disabled={importingSections || selectedSectionImportNames.length === 0}
+            >
+              {importingSections ? 'Importando...' : 'Importar seções'}
+            </button>
+          </>
+        }
+      >
+        {loadingSectionImportOptions ? (
+          <p className="muted">Carregando seções compatíveis...</p>
+        ) : sectionImportOptions.length === 0 ? (
+          <p className="muted">Nenhuma seção compatível foi encontrada no modelo.</p>
+        ) : (
+          <div className="stack">
+            {sectionImportOptions.map((section) => {
+              const checked = selectedSectionImportNames.includes(section.nome)
+
+              return (
+                <label key={section.id} className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={section.alreadyImported || importingSections}
+                    onChange={(event) => {
+                      setSelectedSectionImportNames((current) =>
+                        event.target.checked
+                          ? [...current, section.nome]
+                          : current.filter((name) => name !== section.nome)
+                      )
+                    }}
+                  />
+                  <span>
+                    {section.nome}
+                    {section.alreadyImported ? ' (já importada)' : ''}
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+        )}
+      </AppDialog>
+
       <PageHeader
         eyebrow="Documentação"
         title={dados.documentacao.titulo}
@@ -284,6 +1950,9 @@ export default function DocumentacaoView({ dados, onRefresh }) {
             </button>
             <button className="btn btn--ghost" onClick={() => router.push('/dashboard')}>
               Dashboard
+            </button>
+            <button className="btn btn--secondary" onClick={abrirDialogImportacao}>
+              Importar do modelo
             </button>
           </div>
         }
@@ -315,75 +1984,133 @@ export default function DocumentacaoView({ dados, onRefresh }) {
           <EmptyState
             title="Nenhum anexo encontrado"
             description="Esta documentação ainda não possui anexos vinculados."
+            action={
+              <button className="btn btn--secondary" onClick={abrirDialogImportacao}>
+                Importar do modelo
+              </button>
+            }
           />
         </SurfaceCard>
       ) : (
         <div className="anexo-list">
-          {dados.anexos.map((anexo) => (
-            <SurfaceCard key={anexo.id}>
+          {attachmentGroups.map((group) => (
+            <SurfaceCard key={group.baseName}>
               <div className="surface-card__header">
                 <div>
-                  <h2 className="surface-card__title">{anexo.nome}</h2>
+                  <h2 className="surface-card__title">{group.baseName}</h2>
                   <p className="surface-card__subtitle">
-                    {anexo.descricao || 'Sem descrição cadastrada para este anexo.'}
+                    {group.attachments[0]?.descricao || 'Sem descrição cadastrada para este anexo.'}
                   </p>
                 </div>
-
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  onClick={() => criarSecao(anexo)}
-                  disabled={loadingAnexoId === anexo.id}
-                >
-                  {loadingAnexoId === anexo.id ? 'Criando...' : 'Nova seção'}
-                </button>
+                <div className="cluster">
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    onClick={() => toggleGroupCollapsed(group.baseName)}
+                  >
+                    {collapsedGroupNames.includes(group.baseName) ? 'Expandir' : 'Recolher'}
+                  </button>
+                  {isOQDocument && group.baseName === 'Startup de UTA' ? (
+                    <button
+                      className="btn btn--primary"
+                      onClick={adicionarEquipamento}
+                      disabled={addingEquipment || dados.anexos.length === 0}
+                    >
+                      {addingEquipment ? 'Adicionando...' : 'Adicionar equipamento'}
+                    </button>
+                  ) : null}
+                </div>
               </div>
 
-              {anexo.secoes.length === 0 ? (
-                <EmptyState
-                  title="Nenhuma seção encontrada"
-                  description="Use a ação acima para adicionar a primeira seção deste anexo."
-                />
-              ) : (
-                <div className="section-list">
-                  {anexo.secoes.map((secao) => (
-                    <div key={secao.id} className="section-panel stack">
-                      <div className="section-panel__header">
-                        <div className="cluster">
-                          <span className="badge badge--primary">{secao.nome}</span>
-                          <span className="badge">
-                            {secao.campos.length} {secao.campos.length === 1 ? 'campo' : 'campos'}
-                          </span>
-                        </div>
-
+              {collapsedGroupNames.includes(group.baseName) ? null : (
+              <div className="anexo-list">
+                {group.attachments.map((anexo) => (
+                  <SurfaceCard key={anexo.id}>
+                    <div className="surface-card__header">
+                      <div>
+                        <h3 className="surface-card__title">{getAttachmentEquipmentLabel(anexo.nome)}</h3>
+                        <p className="surface-card__subtitle">
+                          {anexo.nome}
+                        </p>
+                      </div>
+                      <div className="cluster">
                         <button
                           type="button"
-                          className="btn btn--secondary"
-                          onClick={() => salvarSecao(secao)}
-                          disabled={savingSectionId === secao.id}
+                          className="btn btn--ghost"
+                          onClick={() => toggleAnexoCollapsed(anexo.id)}
                         >
-                          {savingSectionId === secao.id ? 'Salvando...' : 'Salvar respostas'}
+                          {collapsedAnexoIds.includes(anexo.id) ? 'Expandir' : 'Recolher'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--danger"
+                          onClick={() => setDeleteAnexoDialog({ open: true, anexo })}
+                          disabled={deletingAnexoId === anexo.id}
+                        >
+                          {deletingAnexoId === anexo.id ? 'Excluindo...' : 'Excluir anexo'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--primary"
+                          onClick={() => abrirDialogImportacaoSecao(anexo)}
+                          disabled={loadingSectionImportOptions || importingSections}
+                        >
+                          Adicionar seção do modelo
                         </button>
                       </div>
-
-                      {secao.campos.length === 0 ? (
-                        <p className="muted">Nenhum campo nesta seção.</p>
-                      ) : (
-                        <div className="form-grid form-grid--single">
-                          {secao.campos.map((campo) => (
-                            <Field
-                              key={campo.id}
-                              label={getCampoLabel(campo)}
-                              hint={campo.tipo ? `Tipo: ${campo.tipo}` : undefined}
-                            >
-                              {renderFieldInput(campo)}
-                            </Field>
-                          ))}
-                        </div>
-                      )}
                     </div>
-                  ))}
-                </div>
+
+                    {collapsedAnexoIds.includes(anexo.id) ? null : anexo.secoes.length === 0 ? (
+                      <EmptyState
+                        title="Nenhuma seção encontrada"
+                        description="Use a ação acima para adicionar a primeira seção deste anexo."
+                      />
+                    ) : (
+                      <div className="section-list">
+                        {anexo.secoes.map((secao) => (
+                          <div key={secao.id} className="section-panel stack">
+                            <div className="section-panel__header">
+                              <div className="cluster">
+                                <span className="badge badge--primary">{secao.nome}</span>
+                                <span className="badge">
+                                  {secao.campos.length} {secao.campos.length === 1 ? 'campo' : 'campos'}
+                                </span>
+                              </div>
+                              <div className="cluster">
+                                <button
+                                  type="button"
+                                  className="btn btn--ghost"
+                                  onClick={() => toggleSectionCollapsed(secao.id)}
+                                >
+                                  {collapsedSectionIds.includes(secao.id) ? 'Expandir' : 'Recolher'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn--danger"
+                                  onClick={() => setDeleteSectionDialog({ open: true, secao })}
+                                  disabled={deletingSectionId === secao.id}
+                                >
+                                  {deletingSectionId === secao.id ? 'Excluindo...' : 'Excluir seção'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn--secondary"
+                                  onClick={() => salvarSecao(secao)}
+                                  disabled={savingSectionId === secao.id}
+                                >
+                                  {savingSectionId === secao.id ? 'Salvando...' : 'Salvar respostas'}
+                                </button>
+                              </div>
+                            </div>
+
+                            {collapsedSectionIds.includes(secao.id) ? null : renderSectionFields(secao)}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </SurfaceCard>
+                ))}
+              </div>
               )}
             </SurfaceCard>
           ))}

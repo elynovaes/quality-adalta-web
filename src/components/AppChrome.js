@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import LogoutButton from './LogoutButton'
 
@@ -190,13 +191,16 @@ export default function AppChrome({ children }) {
         <div className="app-sidebar__inner">
           <div className="app-sidebar__top">
             <div className="app-sidebar__brand">
-              <span className="app-brand__mark">QA</span>
-              {!collapsed ? (
-                <div className="app-brand__text">
-                  <span className="app-brand__title">Quality Adalta</span>
-                  <span className="app-brand__subtitle">Operations dashboard</span>
-                </div>
-              ) : null}
+              <span className="app-brand__logo-wrap">
+                <Image
+                src="/logo-adalta.png"
+                  alt="Adalta Engenharia"
+                  width={150}
+                  height={44}
+                  className="app-brand__logo"
+                  priority
+                />
+              </span>
             </div>
 
             <button
@@ -236,7 +240,7 @@ export default function AppChrome({ children }) {
               </div>
               {!collapsed ? (
                 <div className="sidebar-user__content">
-                  <span className="sidebar-user__name">Quality Adalta</span>
+                  <span className="sidebar-user__name">Adalta Engenharia</span>
                   <span className="sidebar-user__role">Workspace principal</span>
                 </div>
               ) : null}
@@ -260,16 +264,20 @@ export default function AppChrome({ children }) {
         <header className="app-topbar">
           <div className="app-topbar__inner">
             <div className="app-brand">
-              <span className="app-brand__mark">QA</span>
-              <div className="app-brand__text">
-                <span className="app-brand__title">Quality Adalta</span>
-                <span className="app-brand__subtitle">Operations dashboard</span>
-              </div>
+              <span className="app-brand__logo-wrap app-brand__logo-wrap--topbar">
+                <Image
+                src="/logo-adalta.png"
+                  alt="Adalta Engenharia"
+                  width={150}
+                  height={44}
+                  className="app-brand__logo"
+                  priority
+                />
+              </span>
             </div>
 
-            <div className="app-chip">Fluxo de serviços e documentação</div>
-          </div>
-        </header>
+        </div>
+      </header>
 
         <div className="app-content__body">{children}</div>
       </div>

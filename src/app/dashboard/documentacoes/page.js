@@ -1,24 +1,54 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { EmptyState, PageHeader, PageShell, SurfaceCard } from '@/components/ui'
+import { PromptDialog } from '@/components/AppDialog'
 import {
   addAttachmentModel,
   addModelReportType,
   addQualificationModality,
   addQualificationType,
   fetchDocumentacaoModelCatalog,
+  reorderAttachmentModels,
 } from '@/features/documentacao/services/documentacaoModelService'
 
 function normalizeEntry(value) {
   return value.trim()
 }
 
+function indexToLetters(index) {
+  let current = index + 1
+  let result = ''
+
+  while (current > 0) {
+    const remainder = (current - 1) % 26
+    result = String.fromCharCode(65 + remainder) + result
+    current = Math.floor((current - 1) / 26)
+  }
+
+  return result
+}
+
 export default function DocumentacoesHubPage() {
+  const router = useRouter()
   const [catalog, setCatalog] = useState(null)
   const [selectedModality, setSelectedModality] = useState('HVAC')
   const [selectedQualificationType, setSelectedQualificationType] = useState('OQ')
+  const [draggingAttachmentId, setDraggingAttachmentId] = useState(null)
   const [error, setError] = useState('')
+  const [dialogError, setDialogError] = useState('')
+  const [dialogBusy, setDialogBusy] = useState(false)
+  const [promptDialog, setPromptDialog] = useState({
+    open: false,
+    title: '',
+    description: '',
+    label: '',
+    placeholder: '',
+    defaultValue: '',
+    confirmLabel: 'Salvar',
+    onConfirm: null,
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -58,111 +88,204 @@ export default function DocumentacoesHubPage() {
     const loadedCatalog = await fetchDocumentacaoModelCatalog()
     setCatalog(loadedCatalog)
 
-    if (!loadedCatalog.qualificationModalities.includes(selectedModality)) {
-      setSelectedModality(loadedCatalog.qualificationModalities[0] || 'HVAC')
+    const nextModality = loadedCatalog.qualificationModalities.includes(selectedModality)
+      ? selectedModality
+      : loadedCatalog.qualificationModalities[0] || 'HVAC'
+
+    if (nextModality !== selectedModality) {
+      setSelectedModality(nextModality)
     }
 
-    const currentTypes = loadedCatalog.qualificationTypesByModality?.[selectedModality] || []
+    const currentTypes = loadedCatalog.qualificationTypesByModality?.[nextModality] || []
+    const nextQualificationType = currentTypes.includes(selectedQualificationType)
+      ? selectedQualificationType
+      : currentTypes[0] || 'OQ'
 
-    if (!currentTypes.includes(selectedQualificationType)) {
-      setSelectedQualificationType(currentTypes[0] || 'OQ')
+    if (nextQualificationType !== selectedQualificationType) {
+      setSelectedQualificationType(nextQualificationType)
     }
+
+    return loadedCatalog
   }
 
-  async function handleAddReportType() {
-    const nextType = window.prompt('Nome do novo tipo de relatório')
-
-    if (!nextType) {
-      return
-    }
-
-    const normalizedType = normalizeEntry(nextType)
-
-    if (!normalizedType) {
-      return
-    }
-
-    try {
-      await addModelReportType(normalizedType)
-      await refreshCatalog()
-      setError('')
-    } catch (actionError) {
-      setError(actionError.message || 'Nao foi possivel adicionar o tipo de relatório.')
-    }
+  function closePromptDialog() {
+    setPromptDialog((current) => ({ ...current, open: false }))
+    setDialogError('')
   }
 
-  async function handleAddQualificationModality() {
-    const nextModality = window.prompt('Nome da nova modalidade de Qualificação')
-
-    if (!nextModality) {
-      return
-    }
-
-    const normalizedModality = normalizeEntry(nextModality)
-
-    if (!normalizedModality) {
-      return
-    }
-
-    try {
-      await addQualificationModality(normalizedModality)
-      await refreshCatalog()
-      setSelectedModality(normalizedModality)
-      setError('')
-    } catch (actionError) {
-      setError(actionError.message || 'Nao foi possivel adicionar a modalidade.')
-    }
+  function openPromptDialog(config) {
+    setPromptDialog({
+      open: true,
+      title: config.title,
+      description: config.description || '',
+      label: config.label,
+      placeholder: config.placeholder || '',
+      defaultValue: config.defaultValue || '',
+      confirmLabel: config.confirmLabel || 'Salvar',
+      onConfirm: config.onConfirm,
+    })
+    setDialogError('')
   }
 
-  async function handleAddQualificationType() {
-    const nextType = window.prompt(`Nome do novo tipo de qualificação em ${selectedModality}`)
+  function handleAddReportType() {
+    openPromptDialog({
+      title: 'Novo tipo de relatório',
+      description: 'Cadastre um novo tipo mestre para aparecer na página de modelos.',
+      label: 'Nome do tipo',
+      placeholder: 'Ex.: Validação',
+      confirmLabel: 'Criar tipo',
+      onConfirm: async (value) => {
+        const normalizedType = normalizeEntry(value)
 
-    if (!nextType) {
-      return
-    }
+        if (!normalizedType) {
+          setDialogError('Informe o nome do tipo de relatório.')
+          return
+        }
 
-    const normalizedType = normalizeEntry(nextType).toUpperCase()
-
-    if (!normalizedType) {
-      return
-    }
-
-    try {
-      await addQualificationType({
-        modalidade: selectedModality,
-        nome: normalizedType,
-      })
-      await refreshCatalog()
-      setSelectedQualificationType(normalizedType)
-      setError('')
-    } catch (actionError) {
-      setError(actionError.message || 'Nao foi possivel adicionar o tipo de qualificação.')
-    }
+        try {
+          setDialogBusy(true)
+          await addModelReportType(normalizedType)
+          await refreshCatalog()
+          closePromptDialog()
+          setError('')
+        } catch (actionError) {
+          setDialogError(actionError.message || 'Nao foi possivel adicionar o tipo de relatório.')
+        } finally {
+          setDialogBusy(false)
+        }
+      },
+    })
   }
 
-  async function handleAddAttachment() {
-    const nextAttachment = window.prompt(`Nome do novo anexo de ${selectedModality} ${selectedQualificationType}`)
+  function handleAddQualificationModality() {
+    openPromptDialog({
+      title: 'Nova modalidade de Qualificação',
+      description: 'Essa modalidade ficará disponível para montar modelos de anexos.',
+      label: 'Nome da modalidade',
+      placeholder: 'Ex.: Salas limpas',
+      confirmLabel: 'Criar modalidade',
+      onConfirm: async (value) => {
+        const normalizedModality = normalizeEntry(value)
 
-    if (!nextAttachment) {
+        if (!normalizedModality) {
+          setDialogError('Informe o nome da modalidade.')
+          return
+        }
+
+        try {
+          setDialogBusy(true)
+          await addQualificationModality(normalizedModality)
+          await refreshCatalog()
+          setSelectedModality(normalizedModality)
+          closePromptDialog()
+          setError('')
+        } catch (actionError) {
+          setDialogError(actionError.message || 'Nao foi possivel adicionar a modalidade.')
+        } finally {
+          setDialogBusy(false)
+        }
+      },
+    })
+  }
+
+  function handleAddQualificationType() {
+    openPromptDialog({
+      title: `Novo tipo em ${selectedModality}`,
+      description: 'Use essa ação para cadastrar novas etapas além de IQ, OQ e PQ.',
+      label: 'Nome do tipo',
+      placeholder: 'Ex.: FAT',
+      confirmLabel: 'Criar tipo',
+      onConfirm: async (value) => {
+        const normalizedType = normalizeEntry(value).toUpperCase()
+
+        if (!normalizedType) {
+          setDialogError('Informe o nome do tipo de qualificação.')
+          return
+        }
+
+        try {
+          setDialogBusy(true)
+          await addQualificationType({
+            modalidade: selectedModality,
+            nome: normalizedType,
+          })
+          await refreshCatalog()
+          setSelectedQualificationType(normalizedType)
+          closePromptDialog()
+          setError('')
+        } catch (actionError) {
+          setDialogError(actionError.message || 'Nao foi possivel adicionar o tipo de qualificação.')
+        } finally {
+          setDialogBusy(false)
+        }
+      },
+    })
+  }
+
+  function handleAddAttachment() {
+    openPromptDialog({
+      title: `Novo anexo de ${selectedModality} ${selectedQualificationType}`,
+      description: 'Depois de criar, você já será levado para a página própria do anexo.',
+      label: 'Nome do anexo',
+      placeholder: 'Ex.: Startup de UTA',
+      confirmLabel: 'Criar anexo',
+      onConfirm: async (value) => {
+        const normalizedAttachment = normalizeEntry(value)
+
+        if (!normalizedAttachment) {
+          setDialogError('Informe o nome do anexo.')
+          return
+        }
+
+        try {
+          setDialogBusy(true)
+          await addAttachmentModel({
+            modalidade: selectedModality,
+            qualificationType: selectedQualificationType,
+            nome: normalizedAttachment,
+          })
+          const refreshedCatalog = await refreshCatalog()
+          const currentAttachments =
+            refreshedCatalog.attachmentsByKey?.[`${selectedModality}:${selectedQualificationType}`] || []
+          const createdAttachment = currentAttachments.find((attachment) => attachment.nome === normalizedAttachment)
+          closePromptDialog()
+          setError('')
+
+          if (createdAttachment?.id) {
+            router.push(`/dashboard/documentacoes/modelos/anexos/${createdAttachment.id}`)
+          }
+        } catch (actionError) {
+          setDialogError(actionError.message || 'Nao foi possivel adicionar o anexo ao modelo.')
+        } finally {
+          setDialogBusy(false)
+        }
+      },
+    })
+  }
+
+  async function reorderAttachments(attachmentId, targetAttachmentId) {
+    if (!attachmentId || !targetAttachmentId || attachmentId === targetAttachmentId) {
       return
     }
 
-    const normalizedAttachment = normalizeEntry(nextAttachment)
+    const currentAttachments = [...attachments]
+    const currentIndex = currentAttachments.findIndex((item) => item.id === attachmentId)
+    const targetIndex = currentAttachments.findIndex((item) => item.id === targetAttachmentId)
 
-    if (!normalizedAttachment) {
+    if (currentIndex < 0 || targetIndex < 0) {
       return
     }
+
+    const [movedAttachment] = currentAttachments.splice(currentIndex, 1)
+    currentAttachments.splice(targetIndex, 0, movedAttachment)
 
     try {
-      await addAttachmentModel({
-        modalidade: selectedModality,
-        qualificationType: selectedQualificationType,
-        nome: normalizedAttachment,
-      })
+      await reorderAttachmentModels(currentAttachments)
       await refreshCatalog()
+      setDraggingAttachmentId(null)
       setError('')
     } catch (actionError) {
-      setError(actionError.message || 'Nao foi possivel adicionar o anexo ao modelo.')
+      setError(actionError.message || 'Nao foi possivel reordenar os anexos.')
     }
   }
 
@@ -184,6 +307,21 @@ export default function DocumentacoesHubPage() {
 
   return (
     <PageShell>
+      <PromptDialog
+        key={`${promptDialog.title}:${promptDialog.defaultValue}:${promptDialog.open}`}
+        open={promptDialog.open}
+        title={promptDialog.title}
+        description={promptDialog.description}
+        label={promptDialog.label}
+        placeholder={promptDialog.placeholder}
+        defaultValue={promptDialog.defaultValue}
+        confirmLabel={promptDialog.confirmLabel}
+        busy={dialogBusy}
+        error={dialogError}
+        onClose={closePromptDialog}
+        onConfirm={(value) => promptDialog.onConfirm?.(value)}
+      />
+
       <PageHeader
         eyebrow="Documentações"
         title="Modelos de documentação"
@@ -302,14 +440,16 @@ export default function DocumentacoesHubPage() {
         ) : (
           <>
             <div className="tabs-row" role="tablist" aria-label={`Tipos de ${selectedModality}`}>
-              {qualificationTypes.map((type) => (
-                <button
+                {qualificationTypes.map((type) => (
+                  <button
                   key={type}
                   type="button"
                   role="tab"
                   aria-selected={selectedQualificationType === type}
                   className={`tab-button ${selectedQualificationType === type ? 'tab-button--active' : ''}`}
-                  onClick={() => setSelectedQualificationType(type)}
+                  onClick={() => {
+                    setSelectedQualificationType(type)
+                  }}
                 >
                   {type}
                 </button>
@@ -337,14 +477,40 @@ export default function DocumentacoesHubPage() {
               ) : (
                 <div className="documentation-plan__list">
                   {attachments.map((attachment, index) => (
-                    <div key={`${attachment.id || attachment.nome}-${index}`} className="plan-item">
+                    <div
+                      key={`${attachment.id || attachment.nome}-${index}`}
+                      className="plan-item"
+                      draggable={Boolean(attachment.id)}
+                      onDragStart={() => setDraggingAttachmentId(attachment.id)}
+                      onDragOver={(event) => {
+                        event.preventDefault()
+                      }}
+                      onDrop={() => reorderAttachments(draggingAttachmentId, attachment.id)}
+                      onDragEnd={() => setDraggingAttachmentId(null)}
+                    >
                       <div>
-                        <strong>Anexo {String(index + 1).padStart(2, '0')}</strong>
+                        <strong>Anexo {indexToLetters(index)}</strong>
                         <p className="muted">{attachment.nome}</p>
                       </div>
-                      <span className="badge badge--primary">
-                        {selectedModality} {selectedQualificationType}
-                      </span>
+                      <div className="cluster">
+                        <span className="badge">{attachment.id ? 'Arraste para reordenar' : 'Sem persistência'}</span>
+                        <span className="badge badge--primary">
+                          {selectedModality} {selectedQualificationType}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn btn--secondary"
+                          onClick={() => {
+                            if (!attachment.id) {
+                              return
+                            }
+
+                            router.push(`/dashboard/documentacoes/modelos/anexos/${attachment.id}`)
+                          }}
+                        >
+                          Editar anexo
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
