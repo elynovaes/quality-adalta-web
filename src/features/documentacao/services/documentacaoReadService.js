@@ -1,5 +1,22 @@
 import { supabase } from '@/lib/supabase'
 import { fetchAttachmentsForQualification } from '@/features/documentacao/services/documentacaoModelService'
+import {
+  AIRFLOW_ACCEPTANCE_SUFFIX,
+  AIRFLOW_BLOCK_LABELS,
+  AIRFLOW_CONFIGURATION_FIELD,
+  AIRFLOW_DEVIATION_COMMENT_SUFFIX,
+  AIRFLOW_MATRIX_STORAGE_SUFFIX,
+  AIRFLOW_MEASURED_FLOW_SUFFIX,
+  AIRFLOW_METHOD_SUFFIX,
+  AIRFLOW_OUTLET_SUM_SUFFIX,
+  AIRFLOW_PERCENTAGE_SUFFIX,
+  AIRFLOW_SEGMENT_COUNT_SUFFIX,
+  AIRFLOW_SEGMENT_NOMINALS_SUFFIX,
+  AIRFLOW_SEGMENTS_DATA_SUFFIX,
+  buildMissingAirflowSupportFields,
+  isAirflowSectionName,
+  mergeAirflowSupportFields,
+} from '@/features/documentacao/utils/airflowSupportFields'
 
 const RESPONSE_COLUMN_CANDIDATES = [
   { fieldKey: 'campo_id', valueKey: 'valor' },
@@ -7,194 +24,6 @@ const RESPONSE_COLUMN_CANDIDATES = [
   { fieldKey: 'anexo_campo_id', valueKey: 'valor' },
   { fieldKey: 'anexo_campo_id', valueKey: 'resposta' },
 ]
-const AIRFLOW_BLOCK_LABELS = [
-  'Duto de ar de insuflamento',
-  'Duto de ar de retorno',
-  'Duto de ar externo',
-]
-const AIRFLOW_METHOD_SUFFIX = 'Método de medição'
-const AIRFLOW_SEGMENT_COUNT_SUFFIX = 'Quantidade de trechos'
-const AIRFLOW_CONFIGURATION_FIELD = 'Configuração dos dutos'
-const AIRFLOW_ACCEPTANCE_SUFFIX = 'Critério de aceitação por ponto'
-const AIRFLOW_MATRIX_STORAGE_SUFFIX = 'Leituras da matriz'
-const AIRFLOW_SEGMENTS_DATA_SUFFIX = 'Trechos de pitot'
-const AIRFLOW_SEGMENT_NOMINALS_SUFFIX = 'Vazões nominais dos trechos'
-const AIRFLOW_MEASURED_FLOW_SUFFIX = 'Vazão medida'
-const AIRFLOW_PERCENTAGE_SUFFIX = '% em relação à vazão nominal'
-const AIRFLOW_OUTLET_SUM_SUFFIX = 'Somatório de bocas'
-const AIRFLOW_DEVIATION_COMMENT_SUFFIX = 'Comentário de desvio'
-
-function isAirflowSectionName(nome) {
-  const normalized = String(nome || '').trim().toLowerCase()
-  return normalized === 'vazão de ar' || normalized === 'vazao de ar'
-}
-
-async function ensureAirflowMatrixStorageFields(secaoId, secaoNome, campos) {
-  if (!isAirflowSectionName(secaoNome)) {
-    return campos
-  }
-
-  const currentFields = campos || []
-  const currentNames = new Set(currentFields.map((field) => field.nome))
-  const maxOrder = currentFields.reduce((max, field) => Math.max(max, Number(field.ordem || 0)), 0)
-  const missingPayload = [
-    !currentNames.has(AIRFLOW_CONFIGURATION_FIELD)
-      ? {
-          secao_id: secaoId,
-          nome: AIRFLOW_CONFIGURATION_FIELD,
-          label: AIRFLOW_CONFIGURATION_FIELD,
-          tipo: 'select',
-          opcoes:
-            '100% ar externo - somente insuflamento;Insuflamento + retorno;Insuflamento + ar externo;Insuflamento + retorno + ar externo',
-          ordem: 1,
-          ativo: true,
-        }
-      : null,
-    ...AIRFLOW_BLOCK_LABELS
-    .flatMap((blockLabel, index) => {
-      const payload = []
-      const supportsOutletSum =
-        blockLabel === 'Duto de ar de insuflamento' || blockLabel === 'Duto de ar de retorno'
-
-      if (supportsOutletSum && !currentNames.has(`${blockLabel} - ${AIRFLOW_METHOD_SUFFIX}`)) {
-        payload.push({
-          secao_id: secaoId,
-          nome: `${blockLabel} - ${AIRFLOW_METHOD_SUFFIX}`,
-          label: AIRFLOW_METHOD_SUFFIX,
-          tipo: 'select',
-          opcoes: 'Tubo de Pitot;Somatório de bocas',
-          ordem: maxOrder + index * 7 + 1,
-          ativo: true,
-        })
-      }
-
-      if (!currentNames.has(`${blockLabel} - ${AIRFLOW_SEGMENT_COUNT_SUFFIX}`)) {
-        payload.push({
-          secao_id: secaoId,
-          nome: `${blockLabel} - ${AIRFLOW_SEGMENT_COUNT_SUFFIX}`,
-          label: AIRFLOW_SEGMENT_COUNT_SUFFIX,
-          tipo: 'number',
-          ordem: maxOrder + index * 9 + 2,
-          ativo: true,
-        })
-      }
-
-      if (!currentNames.has(`${blockLabel} - ${AIRFLOW_MATRIX_STORAGE_SUFFIX}`)) {
-        payload.push({
-          secao_id: secaoId,
-          nome: `${blockLabel} - ${AIRFLOW_MATRIX_STORAGE_SUFFIX}`,
-          label: AIRFLOW_MATRIX_STORAGE_SUFFIX,
-          tipo: 'json',
-          ordem: maxOrder + index * 9 + 3,
-          ativo: true,
-        })
-      }
-
-      if (!currentNames.has(`${blockLabel} - ${AIRFLOW_SEGMENTS_DATA_SUFFIX}`)) {
-        payload.push({
-          secao_id: secaoId,
-          nome: `${blockLabel} - ${AIRFLOW_SEGMENTS_DATA_SUFFIX}`,
-          label: AIRFLOW_SEGMENTS_DATA_SUFFIX,
-          tipo: 'json',
-          ordem: maxOrder + index * 9 + 4,
-          ativo: true,
-        })
-      }
-
-      if (!currentNames.has(`${blockLabel} - ${AIRFLOW_SEGMENT_NOMINALS_SUFFIX}`)) {
-        payload.push({
-          secao_id: secaoId,
-          nome: `${blockLabel} - ${AIRFLOW_SEGMENT_NOMINALS_SUFFIX}`,
-          label: AIRFLOW_SEGMENT_NOMINALS_SUFFIX,
-          tipo: 'json',
-          ordem: maxOrder + index * 9 + 5,
-          ativo: true,
-        })
-      }
-
-      if (!currentNames.has(`${blockLabel} - ${AIRFLOW_ACCEPTANCE_SUFFIX}`)) {
-        payload.push({
-          secao_id: secaoId,
-          nome: `${blockLabel} - ${AIRFLOW_ACCEPTANCE_SUFFIX}`,
-          label: AIRFLOW_ACCEPTANCE_SUFFIX,
-          tipo: 'text',
-          ordem: maxOrder + index * 9 + 6,
-          ativo: true,
-        })
-      }
-
-      if (!currentNames.has(`${blockLabel} - ${AIRFLOW_MEASURED_FLOW_SUFFIX}`)) {
-        payload.push({
-          secao_id: secaoId,
-          nome: `${blockLabel} - ${AIRFLOW_MEASURED_FLOW_SUFFIX}`,
-          label: AIRFLOW_MEASURED_FLOW_SUFFIX,
-          tipo: 'number',
-          ordem: maxOrder + index * 9 + 7,
-          ativo: true,
-        })
-      }
-
-      if (!currentNames.has(`${blockLabel} - ${AIRFLOW_PERCENTAGE_SUFFIX}`)) {
-        payload.push({
-          secao_id: secaoId,
-          nome: `${blockLabel} - ${AIRFLOW_PERCENTAGE_SUFFIX}`,
-          label: AIRFLOW_PERCENTAGE_SUFFIX,
-          tipo: 'text',
-          ordem: maxOrder + index * 9 + 8,
-          ativo: true,
-        })
-      }
-
-      if (supportsOutletSum && !currentNames.has(`${blockLabel} - ${AIRFLOW_OUTLET_SUM_SUFFIX}`)) {
-        payload.push({
-          secao_id: secaoId,
-          nome: `${blockLabel} - ${AIRFLOW_OUTLET_SUM_SUFFIX}`,
-          label: AIRFLOW_OUTLET_SUM_SUFFIX,
-          tipo: 'number',
-          ordem: maxOrder + index * 9 + 9,
-          ativo: true,
-        })
-      }
-
-      if (!currentNames.has(`${blockLabel} - ${AIRFLOW_DEVIATION_COMMENT_SUFFIX}`)) {
-        payload.push({
-          secao_id: secaoId,
-          nome: `${blockLabel} - ${AIRFLOW_DEVIATION_COMMENT_SUFFIX}`,
-          label: AIRFLOW_DEVIATION_COMMENT_SUFFIX,
-          tipo: 'textarea',
-          ordem: maxOrder + index * 9 + 10,
-          ativo: true,
-        })
-      }
-
-      return payload
-    }),
-  ].filter(Boolean)
-
-  if (!missingPayload.length) {
-    return currentFields
-  }
-
-  let { data, error } = await supabase
-    .from('anexo_campos')
-    .insert(missingPayload)
-    .select('*')
-
-  if (error && /label|tipo|opcoes|ativo/i.test(error.message || '')) {
-    const fallback = await supabase
-      .from('anexo_campos')
-      .insert(missingPayload.map(stripOptionalCampoColumns))
-      .select('*')
-    data = fallback.data
-    error = fallback.error
-  }
-
-  if (error) {
-    throw new Error(`Erro ao ajustar campos internos de Vazão de Ar: ${error.message}`)
-  }
-
-  return [...currentFields, ...(data || [])].sort((a, b) => Number(a.ordem || 0) - Number(b.ordem || 0))
-}
 
 async function fetchResponseColumns(documentacaoId) {
   for (const candidate of RESPONSE_COLUMN_CANDIDATES) {
@@ -270,6 +99,104 @@ function buildResponsesMap(rows, columns) {
   )
 }
 
+function isMissingRpcFunctionError(error) {
+  return /function .* does not exist|Could not find the function|not find the function|42883/i.test(
+    error?.message || ''
+  )
+}
+
+function isMissingColumnError(error, columnName) {
+  return new RegExp(`column .*${columnName}.* does not exist`, 'i').test(error?.message || '')
+}
+
+async function fetchSectionFields(secaoId) {
+  let { data, error } = await supabase
+    .from('anexo_campos')
+    .select('id, nome, label, tipo, ordem, opcoes, ativo, secao_id')
+    .eq('secao_id', secaoId)
+    .order('ordem', { ascending: true })
+
+  if (error && isMissingColumnError(error, 'opcoes')) {
+    const fallback = await supabase
+      .from('anexo_campos')
+      .select('id, nome, label, tipo, ordem, ativo, secao_id')
+      .eq('secao_id', secaoId)
+      .order('ordem', { ascending: true })
+
+    data = (fallback.data || []).map((field) => ({ ...field, opcoes: '' }))
+    error = fallback.error
+  }
+
+  return {
+    data: data || [],
+    error,
+  }
+}
+
+export async function ensureDocumentacaoSectionSupportFields(secaoId, secaoNome, campos = []) {
+  const missingPayload = buildMissingAirflowSupportFields(secaoId, secaoNome, campos)
+
+  if (!missingPayload.length) {
+    return campos
+  }
+
+  let { data, error } = await supabase
+    .from('anexo_campos')
+    .insert(missingPayload)
+    .select('*')
+
+  if (error && /label|tipo|opcoes|ativo/i.test(error.message || '')) {
+    const fallback = await supabase
+      .from('anexo_campos')
+      .insert(missingPayload.map(stripOptionalCampoColumns))
+      .select('*')
+    data = fallback.data
+    error = fallback.error
+  }
+
+  if (error) {
+    throw new Error(`Erro ao sincronizar campos internos de Vazão de Ar: ${error.message}`)
+  }
+
+  return [...campos, ...(data || [])].sort((left, right) => Number(left.ordem || 0) - Number(right.ordem || 0))
+}
+
+export async function syncDocumentacaoSupportFields(documentacaoId) {
+  const { data: anexos, error: anexosError } = await supabase
+    .from('anexos')
+    .select('id')
+    .eq('documentacao_id', documentacaoId)
+
+  if (anexosError) {
+    throw new Error(`Erro ao buscar anexos para sincronização: ${anexosError.message}`)
+  }
+
+  for (const anexo of anexos || []) {
+    const { data: secoes, error: secoesError } = await supabase
+      .from('anexo_secoes')
+      .select('id, nome')
+      .eq('anexo_id', anexo.id)
+
+    if (secoesError) {
+      throw new Error(`Erro ao buscar seções para sincronização: ${secoesError.message}`)
+    }
+
+    for (const secao of secoes || []) {
+      if (!isAirflowSectionName(secao.nome)) {
+        continue
+      }
+
+      const { data: campos, error: camposError } = await fetchSectionFields(secao.id)
+
+      if (camposError) {
+        throw new Error(`Erro ao buscar campos da seção ${secao.id}: ${camposError.message}`)
+      }
+
+      await ensureDocumentacaoSectionSupportFields(secao.id, secao.nome, campos || [])
+    }
+  }
+}
+
 export async function fetchDocumentacaoDetails(documentacaoId) {
   const { data: documentacao, error: erroDocs } = await supabase
     .from('documentacoes')
@@ -325,17 +252,13 @@ export async function fetchDocumentacaoDetails(documentacaoId) {
     const secoesComCampos = []
 
     for (const secao of secoes || []) {
-      const { data: campos, error: erroCampos } = await supabase
-        .from('anexo_campos')
-        .select('*')
-        .eq('secao_id', secao.id)
-        .order('ordem', { ascending: true })
+      const { data: campos, error: erroCampos } = await fetchSectionFields(secao.id)
 
       if (erroCampos) {
         throw new Error(`Erro ao buscar campos da seção ${secao.id}: ${erroCampos.message}`)
       }
 
-      const camposComMatriz = await ensureAirflowMatrixStorageFields(secao.id, secao.nome, campos || [])
+      const camposComMatriz = mergeAirflowSupportFields(secao.id, secao.nome, campos || [])
 
       secoesComCampos.push({
         ...secao,
@@ -579,6 +502,18 @@ export async function importModelSectionsToAttachment({
 }
 
 export async function deleteDocumentacaoSection(secaoId) {
+  const rpcAttempt = await supabase.rpc('delete_documentacao_section_cascade', {
+    p_secao_id: secaoId,
+  })
+
+  if (!rpcAttempt.error) {
+    return
+  }
+
+  if (!isMissingRpcFunctionError(rpcAttempt.error)) {
+    throw new Error(`Erro ao excluir seção ${secaoId}: ${rpcAttempt.error.message}`)
+  }
+
   const { data: fields, error: fieldsError } = await supabase
     .from('anexo_campos')
     .select('id')
@@ -762,7 +697,7 @@ async function insertDocumentacaoAttachments(documentacaoId, attachments, initia
   if (error && /modelo_anexo_id/i.test(error.message || '')) {
     const fallbackPayload = payload.map(({ modelo_anexo_id, ...attachment }) => attachment)
     const fallback = await supabase.from('anexos').insert(fallbackPayload).select('id, nome, ordem')
-    data = fallback.data
+    data = (fallback.data || []).map((anexo) => ({ ...anexo, modelo_anexo_id: null }))
     error = fallback.error
   }
 
@@ -992,6 +927,25 @@ export async function importModelAttachmentsToDocumentacao({
   attachmentNames = null,
   selectedSectionsByAttachmentName = {},
 }) {
+  const rpcAttempt = await supabase.rpc('clone_model_attachments_to_documentacao', {
+    p_documentacao_id: documentacaoId,
+    p_modalidade: modalidade,
+    p_attachment_names: Array.isArray(attachmentNames) && attachmentNames.length > 0 ? attachmentNames : null,
+    p_selected_sections: selectedSectionsByAttachmentName,
+  })
+
+  if (!rpcAttempt.error) {
+    const rpcRow = Array.isArray(rpcAttempt.data) ? rpcAttempt.data[0] : rpcAttempt.data
+    return {
+      imported: Number(rpcRow?.imported || 0),
+      skipped: Number(rpcRow?.skipped || 0),
+    }
+  }
+
+  if (!isMissingRpcFunctionError(rpcAttempt.error)) {
+    throw new Error(`Erro ao importar anexos do modelo: ${rpcAttempt.error.message}`)
+  }
+
   const compatible = await resolveCompatibleModelAttachments({
     documentacaoId,
     modalidade,
@@ -1050,6 +1004,18 @@ export async function fetchCompatibleModelAttachmentsForDocumentacao({
 }
 
 export async function deleteDocumentacaoAttachment(anexoId) {
+  const rpcAttempt = await supabase.rpc('delete_documentacao_attachment_cascade', {
+    p_anexo_id: anexoId,
+  })
+
+  if (!rpcAttempt.error) {
+    return
+  }
+
+  if (!isMissingRpcFunctionError(rpcAttempt.error)) {
+    throw new Error(`Erro ao excluir anexo ${anexoId}: ${rpcAttempt.error.message}`)
+  }
+
   const { data: sections, error: sectionsError } = await supabase
     .from('anexo_secoes')
     .select('id')
@@ -1121,6 +1087,22 @@ function getBaseAttachmentName(nome) {
 }
 
 export async function addEquipmentToDocumentacao(documentacaoId) {
+  const rpcAttempt = await supabase.rpc('clone_documentacao_base_attachments_as_equipment', {
+    p_documentacao_id: documentacaoId,
+  })
+
+  if (!rpcAttempt.error) {
+    const rpcRow = Array.isArray(rpcAttempt.data) ? rpcAttempt.data[0] : rpcAttempt.data
+    return {
+      equipmentNumber: Number(rpcRow?.equipment_number || 0),
+      attachments: [],
+    }
+  }
+
+  if (!isMissingRpcFunctionError(rpcAttempt.error)) {
+    throw new Error(`Erro ao adicionar equipamento: ${rpcAttempt.error.message}`)
+  }
+
   const { data: anexos, error: anexosError } = await supabase
     .from('anexos')
     .select('id, nome, descricao, ordem')
@@ -1417,4 +1399,282 @@ export async function updateDocumentacaoCode(documentacaoId, codigo) {
   }
 
   return data
+}
+
+export async function syncDocumentacaoStructureToModel({
+  documentacaoId,
+  modalidade = 'HVAC',
+}) {
+  const { data: documentacao, error: documentacaoError } = await supabase
+    .from('documentacoes')
+    .select('id, categoria, tipo')
+    .eq('id', documentacaoId)
+    .single()
+
+  if (documentacaoError) {
+    throw new Error(`Erro ao buscar documentação ${documentacaoId}: ${documentacaoError.message}`)
+  }
+
+  if (documentacao.categoria !== 'Qualificação') {
+    throw new Error('A sincronização para modelo está disponível apenas para documentações de Qualificação.')
+  }
+
+  const qualificationType = inferQualificationTypeFromDocumentType(documentacao.tipo)
+
+  if (!qualificationType) {
+    throw new Error('Não foi possível identificar IQ, OQ ou PQ a partir do tipo da documentação.')
+  }
+
+  const { data: qualificationTypeData, error: qualificationTypeError } = await supabase
+    .from('modelo_qualificacao_tipos')
+    .select('id, modalidade_id, modelo_qualificacao_modalidades!inner(id, nome)')
+    .eq('nome', qualificationType)
+    .eq('modelo_qualificacao_modalidades.nome', modalidade)
+    .single()
+
+  if (qualificationTypeError) {
+    throw new Error(`Erro ao localizar tipo ${qualificationType} da modalidade ${modalidade}: ${qualificationTypeError.message}`)
+  }
+
+  const { data: anexos, error: anexosError } = await supabase
+    .from('anexos')
+    .select('id, nome, descricao, ordem')
+    .eq('documentacao_id', documentacaoId)
+    .order('ordem', { ascending: true })
+
+  if (anexosError) {
+    throw new Error(`Erro ao buscar anexos da documentação ${documentacaoId}: ${anexosError.message}`)
+  }
+
+  const representativeByBaseName = new Map()
+
+  for (const anexo of anexos || []) {
+    const baseName = getBaseAttachmentName(anexo.nome)
+    const current = representativeByBaseName.get(baseName)
+
+    if (!current || !getEquipmentSuffixMatch(anexo.nome)) {
+      representativeByBaseName.set(baseName, anexo)
+    }
+  }
+
+  const selectedAttachments = Array.from(representativeByBaseName.values())
+
+  const { data: existingModelAttachments, error: modelAttachmentsError } = await supabase
+    .from('modelo_anexos')
+    .select('id, nome, qualificacao_tipo_id')
+    .eq('qualificacao_tipo_id', qualificationTypeData.id)
+
+  if (modelAttachmentsError) {
+    throw new Error(`Erro ao buscar anexos do modelo: ${modelAttachmentsError.message}`)
+  }
+
+  const syncedAttachmentIds = []
+
+  for (const [attachmentIndex, anexo] of selectedAttachments.entries()) {
+    let modelAttachmentId = (existingModelAttachments || []).find(
+      (item) => item.nome === getBaseAttachmentName(anexo.nome)
+    )?.id
+
+    if (!modelAttachmentId) {
+      const { data: createdAttachment, error: createdAttachmentError } = await supabase
+        .from('modelo_anexos')
+        .insert([
+          {
+            qualificacao_tipo_id: qualificationTypeData.id,
+            nome: getBaseAttachmentName(anexo.nome),
+            descricao: anexo.descricao || '',
+            ordem: attachmentIndex + 1,
+            ativo: true,
+          },
+        ])
+        .select('id')
+        .single()
+
+      if (createdAttachmentError) {
+        throw new Error(`Erro ao criar anexo no modelo: ${createdAttachmentError.message}`)
+      }
+
+      modelAttachmentId = createdAttachment.id
+    } else {
+      const { error: updateAttachmentError } = await supabase
+        .from('modelo_anexos')
+        .update({
+          nome: getBaseAttachmentName(anexo.nome),
+          descricao: anexo.descricao || '',
+          ordem: attachmentIndex + 1,
+          ativo: true,
+        })
+        .eq('id', modelAttachmentId)
+
+      if (updateAttachmentError) {
+        throw new Error(`Erro ao atualizar anexo do modelo: ${updateAttachmentError.message}`)
+      }
+    }
+
+    syncedAttachmentIds.push(modelAttachmentId)
+
+    const { data: secoes, error: secoesError } = await supabase
+      .from('anexo_secoes')
+      .select('id, nome, ordem')
+      .eq('anexo_id', anexo.id)
+      .order('ordem', { ascending: true })
+
+    if (secoesError) {
+      throw new Error(`Erro ao buscar seções do anexo ${anexo.id}: ${secoesError.message}`)
+    }
+
+    const { data: existingModelSections, error: existingModelSectionsError } = await supabase
+      .from('modelo_anexo_secoes')
+      .select('id, nome')
+      .eq('modelo_anexo_id', modelAttachmentId)
+
+    if (existingModelSectionsError) {
+      throw new Error(`Erro ao buscar seções do modelo: ${existingModelSectionsError.message}`)
+    }
+
+    const syncedSectionIds = []
+
+    for (const [sectionIndex, secao] of (secoes || []).entries()) {
+      let modelSectionId = (existingModelSections || []).find((item) => item.nome === secao.nome)?.id
+
+      if (!modelSectionId) {
+        const { data: createdSection, error: createdSectionError } = await supabase
+          .from('modelo_anexo_secoes')
+          .insert([
+            {
+              modelo_anexo_id: modelAttachmentId,
+              nome: secao.nome,
+              ordem: sectionIndex + 1,
+              ativo: true,
+            },
+          ])
+          .select('id')
+          .single()
+
+        if (createdSectionError) {
+          throw new Error(`Erro ao criar seção no modelo: ${createdSectionError.message}`)
+        }
+
+        modelSectionId = createdSection.id
+      } else {
+        const { error: updateSectionError } = await supabase
+          .from('modelo_anexo_secoes')
+          .update({
+            nome: secao.nome,
+            ordem: sectionIndex + 1,
+            ativo: true,
+          })
+          .eq('id', modelSectionId)
+
+        if (updateSectionError) {
+          throw new Error(`Erro ao atualizar seção do modelo: ${updateSectionError.message}`)
+        }
+      }
+
+      syncedSectionIds.push(modelSectionId)
+
+      const { data: campos, error: camposError } = await fetchSectionFields(secao.id)
+
+      if (camposError) {
+        throw new Error(`Erro ao buscar campos da seção ${secao.id}: ${camposError.message}`)
+      }
+
+      const { data: existingModelFields, error: existingModelFieldsError } = await supabase
+        .from('modelo_anexo_campos')
+        .select('id, nome')
+        .eq('modelo_secao_id', modelSectionId)
+
+      if (existingModelFieldsError) {
+        throw new Error(`Erro ao buscar campos do modelo: ${existingModelFieldsError.message}`)
+      }
+
+      const syncedFieldIds = []
+
+      for (const [fieldIndex, campo] of (campos || []).entries()) {
+        let modelFieldId = (existingModelFields || []).find((item) => item.nome === campo.nome)?.id
+
+        if (!modelFieldId) {
+          const { data: createdField, error: createdFieldError } = await supabase
+            .from('modelo_anexo_campos')
+            .insert([
+              {
+                modelo_secao_id: modelSectionId,
+                nome: campo.nome,
+                label: campo.label || campo.nome,
+                tipo: campo.tipo || 'text',
+                ordem: fieldIndex + 1,
+                opcoes: campo.opcoes || '',
+                ativo: true,
+              },
+            ])
+            .select('id')
+            .single()
+
+          if (createdFieldError) {
+            throw new Error(`Erro ao criar campo no modelo: ${createdFieldError.message}`)
+          }
+
+          modelFieldId = createdField.id
+        } else {
+          const { error: updateFieldError } = await supabase
+            .from('modelo_anexo_campos')
+            .update({
+              nome: campo.nome,
+              label: campo.label || campo.nome,
+              tipo: campo.tipo || 'text',
+              ordem: fieldIndex + 1,
+              opcoes: campo.opcoes || '',
+              ativo: true,
+            })
+            .eq('id', modelFieldId)
+
+          if (updateFieldError) {
+            throw new Error(`Erro ao atualizar campo do modelo: ${updateFieldError.message}`)
+          }
+        }
+
+        syncedFieldIds.push(modelFieldId)
+      }
+
+      if (syncedFieldIds.length > 0) {
+        const { error: deactivateModelFieldsError } = await supabase
+          .from('modelo_anexo_campos')
+          .update({ ativo: false })
+          .eq('modelo_secao_id', modelSectionId)
+          .not('id', 'in', `(${syncedFieldIds.join(',')})`)
+
+        if (deactivateModelFieldsError) {
+          throw new Error(`Erro ao desativar campos antigos do modelo: ${deactivateModelFieldsError.message}`)
+        }
+      }
+    }
+
+    if (syncedSectionIds.length > 0) {
+      const { error: deactivateSectionsError } = await supabase
+        .from('modelo_anexo_secoes')
+        .update({ ativo: false })
+        .eq('modelo_anexo_id', modelAttachmentId)
+        .not('id', 'in', `(${syncedSectionIds.join(',')})`)
+
+      if (deactivateSectionsError) {
+        throw new Error(`Erro ao desativar seções antigas do modelo: ${deactivateSectionsError.message}`)
+      }
+    }
+  }
+
+  if (syncedAttachmentIds.length > 0) {
+    const { error: deactivateAttachmentsError } = await supabase
+      .from('modelo_anexos')
+      .update({ ativo: false })
+      .eq('qualificacao_tipo_id', qualificationTypeData.id)
+      .not('id', 'in', `(${syncedAttachmentIds.join(',')})`)
+
+    if (deactivateAttachmentsError) {
+      throw new Error(`Erro ao desativar anexos antigos do modelo: ${deactivateAttachmentsError.message}`)
+    }
+  }
+
+  return {
+    syncedAttachments: syncedAttachmentIds.length,
+  }
 }

@@ -324,6 +324,57 @@ async function getNextOrder(tableName, filter = null) {
   return (data?.[0]?.ordem || 0) + 1
 }
 
+function isMissingColumnError(error, columnName) {
+  return new RegExp(`column .*${columnName}.* does not exist`, 'i').test(error?.message || '')
+}
+
+async function fetchModelFieldsBySectionIds(sectionIds, { onlyActive = true } = {}) {
+  if (!sectionIds?.length) {
+    return { data: [], error: null }
+  }
+
+  let query = supabase
+    .from('modelo_anexo_campos')
+    .select('id, nome, label, tipo, ordem, modelo_secao_id, opcoes, ativo')
+    .in('modelo_secao_id', sectionIds)
+    .order('ordem', { ascending: true })
+
+  if (onlyActive) {
+    query = query.eq('ativo', true)
+  }
+
+  let result = await query
+
+  if (result.error && isMissingColumnError(result.error, 'opcoes')) {
+    let fallbackQuery = supabase
+      .from('modelo_anexo_campos')
+      .select('id, nome, label, tipo, ordem, modelo_secao_id, ativo')
+      .in('modelo_secao_id', sectionIds)
+      .order('ordem', { ascending: true })
+
+    if (onlyActive) {
+      fallbackQuery = fallbackQuery.eq('ativo', true)
+    }
+
+    const fallback = await fallbackQuery
+
+    result = {
+      data: (fallback.data || []).map((field) => ({ ...field, opcoes: '' })),
+      error: fallback.error,
+    }
+  }
+
+  return {
+    data: result.data || [],
+    error: result.error,
+  }
+}
+
+async function fetchModelSectionFields(sectionId, options) {
+  const result = await fetchModelFieldsBySectionIds([sectionId], options)
+  return result
+}
+
 export async function addModelReportType(nome) {
   const ordem = await getNextOrder('modelo_tipos_relatorio')
   const { data, error } = await supabase
@@ -519,13 +570,7 @@ export async function fetchAttachmentModelDetails(attachmentId) {
   let fieldsError = null
 
   if ((sections || []).length > 0) {
-    const result = await supabase
-      .from('modelo_anexo_campos')
-      .select('id, nome, label, tipo, ordem, modelo_secao_id, opcoes, ativo')
-      .in('modelo_secao_id', (sections || []).map((section) => section.id))
-      .eq('ativo', true)
-      .order('ordem', { ascending: true })
-
+    const result = await fetchModelFieldsBySectionIds((sections || []).map((section) => section.id))
     fields = result.data || []
     fieldsError = result.error
   }
@@ -650,10 +695,9 @@ export async function ensureAirflowFieldsForSection(sectionId) {
 }
 
 async function syncDefaultFieldsForSection(sectionId, definitions, sectionLabel) {
-  const { data: currentFields, error: currentFieldsError } = await supabase
-    .from('modelo_anexo_campos')
-    .select('id, nome, label, tipo, ordem, opcoes')
-    .eq('modelo_secao_id', sectionId)
+  const { data: currentFields, error: currentFieldsError } = await fetchModelSectionFields(sectionId, {
+    onlyActive: false,
+  })
 
   if (currentFieldsError) {
     throw new Error(`Erro ao consultar campos da seção do modelo: ${currentFieldsError.message}`)
@@ -685,6 +729,7 @@ async function syncDefaultFieldsForSection(sectionId, definitions, sectionLabel)
         tipo: definition.tipo,
         ordem: definition.ordem,
         opcoes: definition.opcoes || '',
+        ativo: true,
       })
       .eq('id', existingField.id)
 

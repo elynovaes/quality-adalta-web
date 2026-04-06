@@ -243,10 +243,20 @@ async function syncDocumentacaoSystems(documentacaoId, systemIds) {
 }
 
 async function listDocumentacaoAnexos(documentacaoId) {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('anexos')
     .select('id, nome, ordem, modelo_anexo_id')
     .eq('documentacao_id', documentacaoId)
+
+  if (error && /modelo_anexo_id/i.test(error.message || '')) {
+    const fallback = await supabase
+      .from('anexos')
+      .select('id, nome, ordem')
+      .eq('documentacao_id', documentacaoId)
+
+    data = (fallback.data || []).map((anexo) => ({ ...anexo, modelo_anexo_id: null }))
+    error = fallback.error
+  }
 
   if (error) {
     throw new Error(`Erro ao consultar anexos da documentação ${documentacaoId}: ${error.message}`)
@@ -279,7 +289,7 @@ async function createDocumentacaoAnexosFromModel(documentacaoId, attachments) {
   if (error && /modelo_anexo_id/i.test(error.message || '')) {
     const fallbackPayload = payload.map(({ modelo_anexo_id, ...attachment }) => attachment)
     const fallback = await supabase.from('anexos').insert(fallbackPayload).select('id, nome, ordem')
-    data = fallback.data
+    data = (fallback.data || []).map((anexo) => ({ ...anexo, modelo_anexo_id: null }))
     error = fallback.error
   }
 

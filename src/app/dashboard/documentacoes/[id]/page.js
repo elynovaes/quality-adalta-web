@@ -3,7 +3,11 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { PageShell, SurfaceCard } from '@/components/ui'
-import { fetchDocumentacaoDetails } from '@/features/documentacao/services/documentacaoReadService'
+import {
+  fetchDocumentacaoDetails,
+  syncDocumentacaoSupportFields,
+} from '@/features/documentacao/services/documentacaoReadService'
+import { isVirtualAirflowFieldId } from '@/features/documentacao/utils/airflowSupportFields'
 import DocumentacaoView from './DocumentacaoView'
 
 export default function DocumentacaoPage() {
@@ -12,6 +16,14 @@ export default function DocumentacaoPage() {
   const [dados, setDados] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+
+  function hasVirtualSupportFields(loaded) {
+    return (loaded?.anexos || []).some((anexo) =>
+      (anexo.secoes || []).some((secao) =>
+        (secao.campos || []).some((campo) => isVirtualAirflowFieldId(campo.id))
+      )
+    )
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -27,7 +39,12 @@ export default function DocumentacaoPage() {
       setError('')
 
       try {
-        const loaded = await fetchDocumentacaoDetails(documentacaoId)
+        let loaded = await fetchDocumentacaoDetails(documentacaoId)
+
+        if (hasVirtualSupportFields(loaded)) {
+          await syncDocumentacaoSupportFields(documentacaoId)
+          loaded = await fetchDocumentacaoDetails(documentacaoId)
+        }
 
         if (!cancelled) {
           setDados(loaded)
@@ -80,5 +97,13 @@ export default function DocumentacaoPage() {
     )
   }
 
-  return <DocumentacaoView dados={dados} onRefresh={() => fetchDocumentacaoDetails(documentacaoId).then(setDados)} />
+  return (
+    <DocumentacaoView
+      dados={dados}
+      onRefresh={async () => {
+        const loaded = await fetchDocumentacaoDetails(documentacaoId)
+        setDados(loaded)
+      }}
+    />
+  )
 }
